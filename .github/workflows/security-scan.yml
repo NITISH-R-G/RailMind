@@ -21,7 +21,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@0.20.0
         with:
           scan-type: 'fs'
           ignore-unfixed: true
@@ -64,8 +64,6 @@ jobs:
   semgrep:
     name: Semgrep
     runs-on: ubuntu-latest
-    container:
-      image: semgrep/semgrep
     permissions:
       contents: read
       security-events: write
@@ -75,7 +73,9 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Run Semgrep
-        run: semgrep scan --config auto --sarif --output semgrep.sarif
+        uses: returntocorp/semgrep-action@v1
+        with:
+          generateSarif: "1"
         env:
           SEMGREP_RULES: p/default
 
