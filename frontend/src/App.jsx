@@ -219,10 +219,18 @@ function MainApp() {
   }, []);
 
   const handleApprove = async (incidentId) => {
+    const adminKey = window.prompt("Enter Admin API Key to approve this reroute:");
+    if (!adminKey) {
+      console.log("Approval cancelled or no key provided.");
+      return;
+    }
     console.log(`Approving reroute plan for incident: ${incidentId}`);
     try {
       const res = await fetch(`${API_BASE}/api/incidents/${incidentId}/approve`, {
-        method: 'POST'
+        method: 'POST',
+        headers: {
+          'X-API-Key': adminKey
+        }
       });
       if (res.ok) {
         setIncidents(prev => prev.map(inc => {
@@ -246,10 +254,18 @@ function MainApp() {
   };
 
   const handleResolve = async (taskId) => {
+    const adminKey = window.prompt("Enter Admin API Key to resolve this task:");
+    if (!adminKey) {
+      console.log("Resolve cancelled or no key provided.");
+      return;
+    }
     console.log(`Resolving department task: ${taskId}`);
     try {
       const res = await fetch(`${API_BASE}/api/dept-tasks/${taskId}/resolve`, {
-        method: 'POST'
+        method: 'POST',
+        headers: {
+          'X-API-Key': adminKey
+        }
       });
       if (res.ok) {
         setTasks(prev => prev.map(t => {
