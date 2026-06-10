@@ -8,7 +8,8 @@ from dotenv import load_dotenv
 env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
 load_dotenv(dotenv_path=env_path)
 
-from fastapi import FastAPI, WebSocket, HTTPException
+from fastapi import FastAPI, WebSocket, HTTPException, Depends, Security
+from fastapi.security import APIKeyHeader
 from fastapi.middleware.cors import CORSMiddleware
 from ..services.db_client import db_client
 
@@ -36,6 +37,19 @@ app.add_middleware(
 # Initialize railways client for fallback train list queries
 api_key = os.getenv("RAILWAYS_API_KEY", "mock_key")
 railways_client = RailwaysAPIClient(api_key=api_key)
+
+# Security
+API_KEY_NAME = "X-API-Key"
+api_key_header = APIKeyHeader(name=API_KEY_NAME, auto_error=False)
+
+def verify_api_key(api_key: str = Security(api_key_header)):
+    expected_api_key = os.getenv("ADMIN_API_KEY", "railmind-admin-key")
+    if api_key != expected_api_key:
+        raise HTTPException(
+            status_code=403,
+            detail="Could not validate credentials"
+        )
+    return api_key
 
 # Global reference storing the most recent loop state from the agent background thread
 latest_agent_state = {
@@ -168,7 +182,7 @@ async def get_dept_tasks_api():
 
 # REST Endpoint: POST /api/dept-tasks/{id}/resolve - Mark task resolved
 @app.post("/api/dept-tasks/{id}/resolve")
-async def resolve_task_api(id: str):
+async def resolve_task_api(id: str, api_key: str = Depends(verify_api_key)):
     try:
         modified_count = await db_client.resolve_department_task(id)
         return {"status": "resolved", "modified_count": modified_count}
@@ -177,7 +191,7 @@ async def resolve_task_api(id: str):
 
 # REST Endpoint: POST /api/incidents/{id}/approve - Approve reroute plan
 @app.post("/api/incidents/{id}/approve")
-async def approve_incident_api(id: str):
+async def approve_incident_api(id: str, api_key: str = Depends(verify_api_key)):
     try:
         modified_count = await db_client.approve_incident(id)
         return {"status": "approved", "modified_count": modified_count}
