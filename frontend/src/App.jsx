@@ -220,9 +220,17 @@ function MainApp() {
 
   const handleApprove = async (incidentId) => {
     console.log(`Approving reroute plan for incident: ${incidentId}`);
+    const apiKey = prompt("Please enter Admin API Key to approve:");
+    if (!apiKey) {
+      console.log("Approval cancelled: No API key provided.");
+      return;
+    }
     try {
       const res = await fetch(`${API_BASE}/api/incidents/${incidentId}/approve`, {
-        method: 'POST'
+        method: 'POST',
+        headers: {
+          'X-API-Key': apiKey
+        }
       });
       if (res.ok) {
         setIncidents(prev => prev.map(inc => {
