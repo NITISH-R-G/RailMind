@@ -8,8 +8,26 @@ from dotenv import load_dotenv
 env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
 load_dotenv(dotenv_path=env_path)
 
-from fastapi import FastAPI, WebSocket, HTTPException
+from fastapi import FastAPI, WebSocket, HTTPException, Security, Depends, status
+from fastapi.security import APIKeyHeader
 from fastapi.middleware.cors import CORSMiddleware
+
+api_key_header = APIKeyHeader(name="X-API-Key", auto_error=True)
+
+def get_api_key(api_key: str = Security(api_key_header)):
+    expected_key = os.getenv("ADMIN_API_KEY")
+    if not expected_key:
+        # Fail securely if the environment variable is missing
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Server configuration error: Authentication is not configured securely.",
+        )
+    if api_key == expected_key:
+        return api_key
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Invalid API Key",
+    )
 from ..services.db_client import db_client
 
 from .routes import router
@@ -177,7 +195,7 @@ async def resolve_task_api(id: str):
 
 # REST Endpoint: POST /api/incidents/{id}/approve - Approve reroute plan
 @app.post("/api/incidents/{id}/approve")
-async def approve_incident_api(id: str):
+async def approve_incident_api(id: str, api_key: str = Depends(get_api_key)):
     try:
         modified_count = await db_client.approve_incident(id)
         return {"status": "approved", "modified_count": modified_count}
