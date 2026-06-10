@@ -3,6 +3,7 @@ import json
 from datetime import datetime
 from motor.motor_asyncio import AsyncIOMotorClient # type: ignore
 import logging
+import aiofiles
 from dotenv import load_dotenv
 
 logger = logging.getLogger(__name__)
@@ -36,18 +37,20 @@ class FallbackDB:
             except Exception as e:
                 logger.error(f"Failed to initialize fallback file: {e}")
 
-    def _read_fallback(self):
+    async def _read_fallback(self):
         self._init_fallback_file()
         try:
-            with open(self.fallback_file, "r") as f:
-                return json.load(f)
+            async with aiofiles.open(self.fallback_file, "r") as f:
+                content = await f.read()
+                return json.loads(content)
         except Exception:
             return {"incidents": [], "department_tasks": []}
 
-    def _write_fallback(self, data):
+    async def _write_fallback(self, data):
         try:
-            with open(self.fallback_file, "w") as f:
-                json.dump(data, f, indent=2, default=str)
+            async with aiofiles.open(self.fallback_file, "w") as f:
+                content = json.dumps(data, indent=2, default=str)
+                await f.write(content)
         except Exception as e:
             logger.error(f"Failed to write to fallback database: {e}")
 
@@ -71,7 +74,7 @@ class FallbackDB:
                 self.use_fallback = True
 
         # Fallback file check
-        data = self._read_fallback()
+        data = await self._read_fallback()
         for inc in data["incidents"]:
             if inc.get("train_number") == train_number:
                 ts_str = inc.get("timestamp")
@@ -96,11 +99,11 @@ class FallbackDB:
                 self.use_fallback = True
         
         # Fallback
-        data = self._read_fallback()
+        data = await self._read_fallback()
         if "_id" not in incident:
             incident["_id"] = incident.get("incident_id")
         data["incidents"].append(incident)
-        self._write_fallback(data)
+        await self._write_fallback(data)
 
     async def get_incidents(self, limit=20):
         if not self.use_fallback:
@@ -115,7 +118,7 @@ class FallbackDB:
                 self.use_fallback = True
                 
         # Fallback
-        data = self._read_fallback()
+        data = await self._read_fallback()
         incidents = data["incidents"]
         try:
             incidents = sorted(incidents, key=lambda x: x.get("timestamp", ""), reverse=True)
@@ -133,9 +136,9 @@ class FallbackDB:
                 self.use_fallback = True
                 
         # Fallback
-        data = self._read_fallback()
+        data = await self._read_fallback()
         data["department_tasks"].extend(tasks)
-        self._write_fallback(data)
+        await self._write_fallback(data)
 
     async def get_pending_department_tasks(self):
         if not self.use_fallback:
@@ -151,7 +154,7 @@ class FallbackDB:
                 self.use_fallback = True
                 
         # Fallback
-        data = self._read_fallback()
+        data = await self._read_fallback()
         pending = []
         for t in data["department_tasks"]:
             if t.get("status") == "pending":
@@ -176,7 +179,7 @@ class FallbackDB:
                 self.use_fallback = True
                 
         # Fallback
-        data = self._read_fallback()
+        data = await self._read_fallback()
         modified_count = 0
         for t in data["department_tasks"]:
             if t.get("incident_id") == task_id or t.get("id") == task_id or str(t.get("_id")) == task_id or t.get("_id") == task_id:
@@ -184,7 +187,7 @@ class FallbackDB:
                     t["status"] = "resolved"
                     modified_count += 1
         if modified_count > 0:
-            self._write_fallback(data)
+            await self._write_fallback(data)
         return modified_count
 
     async def approve_incident(self, incident_id):
@@ -203,7 +206,7 @@ class FallbackDB:
                 self.use_fallback = True
 
         # Fallback file check
-        data = self._read_fallback()
+        data = await self._read_fallback()
         modified_count = 0
         for inc in data["incidents"]:
             if inc.get("incident_id") == incident_id or str(inc.get("_id")) == incident_id or inc.get("_id") == incident_id:
@@ -211,7 +214,7 @@ class FallbackDB:
                     inc["resolution_status"] = "approved"
                     modified_count += 1
         if modified_count > 0:
-            self._write_fallback(data)
+            await self._write_fallback(data)
         return modified_count
 
 db_client = FallbackDB()
