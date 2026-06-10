@@ -55,15 +55,18 @@ async def ingest_node(state: AgentState) -> AgentState:
         
         # Ensure that if some train fetches failed and returned empty dict, they fallback to get_mock_rapidapi_train
         # So we always have all 15 trains
+        # Pre-compute results mapping, but ensuring we retain the first match if duplicate exist to preserve previous logic.
+        results_map = {}
+        for r in results:
+            tn = r.get("train_number")
+            if tn is not None and tn not in results_map:
+                results_map[tn] = r
+
         train_results = []
         for tn in train_numbers:
-            found = False
-            for r in results:
-                if r.get("train_number") == tn:
-                    train_results.append(r)
-                    found = True
-                    break
-            if not found:
+            if tn in results_map:
+                train_results.append(results_map[tn])
+            else:
                 from ..services.railways_api import get_mock_rapidapi_train, parse_rapidapi_train_for_agent
                 mock_data = get_mock_rapidapi_train(tn)
                 parsed_mock = parse_rapidapi_train_for_agent(mock_data, tn)
