@@ -1122,22 +1122,30 @@ function MainApp() {
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', overflowY: 'auto', flex: 1 }}>
-              {incidents.slice(0, 5).map(inc => (
-                <div key={inc.id} style={{
-                  backgroundColor: '#161920',
-                  border: '1px solid #1a1e26',
-                  padding: '10px 14px',
-                  borderRadius: '4px',
-                  fontSize: '12px',
-                  color: '#cbd5e1'
-                }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-                    <span style={{ color: '#ef4444', fontWeight: 600 }}>{inc.severity.toUpperCase()}</span>
-                    <span style={{ color: '#64748b' }}>{inc.timestamp}</span>
-                  </div>
-                  {inc.title}
-                </div>
-              ))}
+              {(() => {
+                const len = Math.min(5, incidents.length);
+                const elements = [];
+                for (let i = 0; i < len; i++) {
+                  const inc = incidents[i];
+                  elements.push(
+                    <div key={inc.id} style={{
+                      backgroundColor: '#161920',
+                      border: '1px solid #1a1e26',
+                      padding: '10px 14px',
+                      borderRadius: '4px',
+                      fontSize: '12px',
+                      color: '#cbd5e1'
+                    }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                        <span style={{ color: '#ef4444', fontWeight: 600 }}>{inc.severity.toUpperCase()}</span>
+                        <span style={{ color: '#64748b' }}>{inc.timestamp}</span>
+                      </div>
+                      {inc.title}
+                    </div>
+                  );
+                }
+                return elements;
+              })()}
               {incidents.length === 0 && (
                 <div style={{ color: '#64748b', fontStyle: 'italic', textAlign: 'center', padding: '20px' }}>
                   No notifications recorded.
