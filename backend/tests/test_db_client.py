@@ -33,7 +33,7 @@ def db_client(tmp_fallback_file, mock_db):
 async def test_init_fallback_file(db_client, tmp_fallback_file):
     await db_client._init_fallback_file()
     assert os.path.exists(tmp_fallback_file)
-    with open(tmp_fallback_file, "r") as f:
+    with open(tmp_fallback_file, "r", encoding="utf-8") as f:
         data = json.load(f)
         assert data == {"incidents": [], "department_tasks": []}
 
@@ -62,8 +62,9 @@ async def test_has_recent_incident_mongodb_not_found(db_client):
 
 @pytest.mark.asyncio
 async def test_has_recent_incident_fallback(db_client):
+    from datetime import timezone
     db_client.use_fallback = True
-    recent_time = datetime.utcnow() - timedelta(minutes=1)
+    recent_time = datetime.now(timezone.utc) - timedelta(minutes=1)
 
     await db_client._write_fallback({
         "incidents": [
@@ -77,8 +78,9 @@ async def test_has_recent_incident_fallback(db_client):
 
 @pytest.mark.asyncio
 async def test_has_recent_incident_fallback_old(db_client):
+    from datetime import timezone
     db_client.use_fallback = True
-    old_time = datetime.utcnow() - timedelta(minutes=10)
+    old_time = datetime.now(timezone.utc) - timedelta(minutes=10)
 
     await db_client._write_fallback({
         "incidents": [
@@ -95,7 +97,7 @@ async def test_insert_incident_mongodb(db_client):
     db_client.db["incidents"].insert_one = AsyncMock()
     incident = {"incident_id": "I123", "train_number": "T123"}
     await db_client.insert_incident(incident)
-    args, kwargs = db_client.db["incidents"].insert_one.call_args
+    args, _ = db_client.db["incidents"].insert_one.call_args
     assert args[0] == incident
 
 @pytest.mark.asyncio
