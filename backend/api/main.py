@@ -35,6 +35,8 @@ def verify_admin(credentials: HTTPBasicCredentials = Depends(security)):
         )
     return credentials.username
 
+
+
 from .routes import router
 from .websocket import websocket_endpoint, websocket_manager # type: ignore
 from ..agents.graph import railmind_graph # type: ignore
@@ -144,7 +146,7 @@ async def ws_endpoint(websocket: WebSocket):
 
 # REST Endpoint: GET /api/incidents - Fetch last 20 incidents (last 24h by default, or all=true)
 @app.get("/api/incidents")
-async def get_incidents_api(all: bool = False):
+async def get_incidents_api(all: bool = False, admin: str = Depends(verify_admin)):
     try:
         from datetime import datetime, timedelta
         # Fetch up to 1000 incidents
@@ -176,7 +178,7 @@ async def get_incidents_api(all: bool = False):
 
 # REST Endpoint: GET /api/trains - Fetch current train statuses
 @app.get("/api/trains")
-async def get_trains_api():
+async def get_trains_api(admin: str = Depends(verify_admin)):
     trains = latest_agent_state.get("raw_train_data", [])
     if not trains:
         # Fallback to mock data if empty
@@ -185,7 +187,7 @@ async def get_trains_api():
 
 # REST Endpoint: GET /api/dept-tasks - Fetch pending tasks
 @app.get("/api/dept-tasks")
-async def get_dept_tasks_api():
+async def get_dept_tasks_api(admin: str = Depends(verify_admin)):
     try:
         return await db_client.get_pending_department_tasks()
     except Exception as e:
@@ -194,7 +196,7 @@ async def get_dept_tasks_api():
 
 # REST Endpoint: POST /api/dept-tasks/{id}/resolve - Mark task resolved
 @app.post("/api/dept-tasks/{id}/resolve")
-async def resolve_task_api(id: str):
+async def resolve_task_api(id: str, admin: str = Depends(verify_admin)):
     try:
         modified_count = await db_client.resolve_department_task(id)
         return {"status": "resolved", "modified_count": modified_count}
@@ -212,7 +214,7 @@ async def approve_incident_api(id: str, admin: str = Depends(verify_admin)):
 
 # REST Endpoint: GET /api/system-status -> returns all system statuses
 @app.get("/api/system-status")
-async def get_system_status():
+async def get_system_status(admin: str = Depends(verify_admin)):
     mongo_status = "Disconnected"
     try:
         from ..services.db_client import client
@@ -248,7 +250,7 @@ async def get_system_status():
 
 # REST Endpoint: GET /api/telemetry -> returns timing metrics
 @app.get("/api/telemetry")
-async def get_telemetry_api():
+async def get_telemetry_api(admin: str = Depends(verify_admin)):
     incident_count = 0
     task_count = 0
     try:

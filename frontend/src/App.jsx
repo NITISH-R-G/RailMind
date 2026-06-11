@@ -62,6 +62,19 @@ class ErrorBoundary extends React.Component {
 }
 
 function MainApp() {
+  const [adminPassword, setAdminPassword] = useState(() => sessionStorage.getItem("adminPassword") || "");
+
+  useEffect(() => {
+    if (!adminPassword) {
+      const p = window.prompt("Enter Admin Password to access the dashboard:");
+      if (p) {
+        sessionStorage.setItem("adminPassword", p);
+        setAdminPassword(p);
+      }
+    }
+  }, [adminPassword]);
+
+  const authHeaders = adminPassword ? { 'Authorization': 'Basic ' + btoa('admin:' + adminPassword) } : {};
   const [activeTab, setActiveTab] = useState('Dashboard');
   const [loopCount, setLoopCount] = useState(0);
   const [incidentCount, setIncidentCount] = useState(0);
@@ -107,7 +120,7 @@ function MainApp() {
   // Fetch functions
   const fetchIncidents = async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/incidents`);
+      const res = await fetch(`${API_BASE}/api/incidents`, { headers: authHeaders });
       if (res.ok) {
         const data = await res.json();
         const formatted = data.map(inc => ({
@@ -138,7 +151,7 @@ function MainApp() {
 
   const fetchTrains = async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/trains`);
+      const res = await fetch(`${API_BASE}/api/trains`, { headers: authHeaders });
       if (res.ok) {
         const data = await res.json();
         setTrains(data);
@@ -150,7 +163,7 @@ function MainApp() {
 
   const fetchTasks = async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/dept-tasks`);
+      const res = await fetch(`${API_BASE}/api/dept-tasks`, { headers: authHeaders });
       if (res.ok) {
         const data = await res.json();
         setTasks(data);
@@ -285,7 +298,8 @@ function MainApp() {
     console.log(`Resolving department task: ${taskId}`);
     try {
       const res = await fetch(`${API_BASE}/api/dept-tasks/${taskId}/resolve`, {
-        method: 'POST'
+        method: 'POST',
+        headers: authHeaders
       });
       if (res.ok) {
         setTasks(prev => prev.map(t => {
@@ -700,7 +714,7 @@ function MainApp() {
 
     const fetchTelemetry = async () => {
       try {
-        const res = await fetch(`${API_BASE}/api/telemetry`);
+        const res = await fetch(`${API_BASE}/api/telemetry`, { headers: authHeaders });
         if (res.ok) {
           const data = await res.json();
           setTelemetry(data);
@@ -765,7 +779,7 @@ function MainApp() {
 
     const fetchSchedules = async () => {
       try {
-        const res = await fetch(`${API_BASE}/api/trains`);
+        const res = await fetch(`${API_BASE}/api/trains`, { headers: authHeaders });
         if (res.ok) {
           const data = await res.json();
           setScheduleTrains(data);
@@ -847,7 +861,7 @@ function MainApp() {
 
     const fetchStatus = async () => {
       try {
-        const res = await fetch(`${API_BASE}/api/system-status`);
+        const res = await fetch(`${API_BASE}/api/system-status`, { headers: authHeaders });
         if (res.ok) {
           const data = await res.json();
           setStatus(data);
