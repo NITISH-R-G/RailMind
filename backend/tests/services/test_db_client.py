@@ -1,6 +1,5 @@
 import pytest
-import pytest_asyncio
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 # We do not use sys.path.append hack; pytest handles paths or we use PYTHONPATH
 from backend.services.db_client import FallbackDB

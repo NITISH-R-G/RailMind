@@ -1,3 +1,4 @@
+import pymongo
 import os
 import json
 import logging
@@ -8,7 +9,7 @@ from datetime import datetime
 from ..services.ai_service import reason_with_ai
 from .state import AgentState, TrainAnomaly, DepartmentTask
 from ..services.db_client import db_client
-from ..services.railways_api import get_cancelled_trains, mock_train_data, RailwaysAPIClient, get_multiple_trains
+from ..services.railways_api import get_cancelled_trains, mock_train_data, RailwaysAPIClient
 from ..services.twilio_service import TwilioSMSClient
 from ..api.websocket import websocket_manager
 
@@ -371,30 +372,25 @@ async def alert_node(state: AgentState) -> AgentState:
         await log_agent("alert_node", f"[RAILMIND] [ERROR] Alert node failed: {e}")
     return state
 
+
 async def save_incident_if_not_duplicate(db, incident):
-    # Check last 5 minutes for same train number
-    from datetime import datetime, timedelta
-    five_mins_ago = datetime.utcnow() - timedelta(minutes=5)
-    
-    existing = await db.incidents.find_one({
-        "train_number": incident["train_number"],
-        "timestamp": {
-            "$gt": five_mins_ago.isoformat()
-        }
-    })
-    
-    if existing:
-        print(f"[RAILMIND] Skipping duplicate incident for "
-              f"train {incident['train_number']} "
-              f"(last logged {existing['timestamp']})")
-        return False
+    from datetime import datetime
+
+    # Create a 5-minute window truncated timestamp for the unique index
+    now = datetime.utcnow()
+    timestamp_window = now.replace(second=0, microsecond=0, minute=(now.minute // 5) * 5)
     
     # Make a copy to avoid inserting _id of type ObjectId in-place into the original dictionary
     incident_copy = incident.copy()
-    await db.incidents.insert_one(incident_copy)
-    print(f"[RAILMIND] New incident saved: "
-          f"{incident['incident_title']}")
-    return True
+    incident_copy["timestamp_window"] = timestamp_window
+
+    try:
+        await db.incidents.insert_one(incident_copy)
+        print(f"[RAILMIND] New incident saved: {incident['incident_title']}")
+        return True
+    except pymongo.errors.DuplicateKeyError:
+        print(f"[RAILMIND] Skipping duplicate incident for train {incident['train_number']} within the current 5-minute window.")
+        return False
 
 async def report_node(state: AgentState) -> AgentState:
     try:
@@ -466,9 +462,6 @@ async def report_node(state: AgentState) -> AgentState:
         state["sms_alerts_sent"] = []
         state["loop_count"] = state.get("loop_count", 0) + 1
 
-        import asyncio
-        await log_agent("report_node", "[RAILMIND] Sleeping for 10 seconds before next iteration...")
-        await asyncio.sleep(10)
     except Exception as e:
         logger.error(f"Error in report_node: {e}")
         await log_agent("report_node", f"[RAILMIND] [ERROR] Report node failed: {e}")

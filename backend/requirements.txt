@@ -10,3 +10,5 @@ twilio
 httpx
 websockets
 google-genai
+arq
+redis

@@ -52,7 +52,7 @@ async def send_department_alerts(department_tasks: list) -> list:
             if success:
                 sent.append(f"{task['department']} -> {phone}")
     
-    passenger_sms = f"[RailMind Alert] Train delay detected. Please check platform boards for updates."
+    passenger_sms = "[RailMind Alert] Train delay detected. Please check platform boards for updates."
     await send_sms(os.getenv("DEMO_PASSENGER_PHONE"), passenger_sms)
     
     return sent

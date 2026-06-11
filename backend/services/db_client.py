@@ -12,13 +12,30 @@ load_dotenv(dotenv_path=env_path)
 
 # Real MongoDB Atlas Connection for RailMind
 MONGODB_URI = os.getenv("MONGODB_URI")
-client = AsyncIOMotorClient(MONGODB_URI)
+# Enforce strict database connectivity pooling
+client = AsyncIOMotorClient(MONGODB_URI, maxPoolSize=50, minPoolSize=10)
 db = client["railmind"]
 
 # Collections needed:
 # - db["incidents"] — for incident reports
 # - db["department_tasks"] — for dept coordination tasks  
 # - db["train_logs"] — for raw train data logs
+
+async def init_db_indexes():
+    """Establish geospatial 2dsphere and unique compound indices."""
+    try:
+        # Create a unique compound index on train_number and timestamp_window (truncated to minute)
+        # to ensure idempotent writes and prevent duplicates natively.
+        await db.incidents.create_index(
+            [("train_number", 1), ("timestamp_window", 1)],
+            unique=True
+        )
+
+        # Optional: geospatial 2dsphere index if train locations are stored as GeoJSON
+        # await db.incidents.create_index([("location", "2dsphere")])
+        logger.info("Database indexes initialized successfully.")
+    except Exception as e:
+        logger.warning(f"Failed to initialize database indexes: {e}")
 
 class FallbackDB:
     def __init__(self):
