@@ -167,7 +167,7 @@ async def test_get_live_train_status_rapidapi_exception(httpx_mock):
 async def test_get_live_train_status_indianrail_success(mock_datetime, httpx_mock):
     mock_datetime.now.return_value.strftime.return_value = "20231024"
     httpx_mock.add_response(
-        url="http://indianrailapi.com/api/v2/livetrainstatus/apikey/test_key/trainnumber/12345/date/20231024/",
+        url="https://indianrailapi.com/api/v2/livetrainstatus/apikey/test_key/trainnumber/12345/date/20231024/",
         json={
             "ResponseCode": "200",
             "TrainNumber": "12345",
@@ -196,7 +196,7 @@ async def test_get_live_train_status_indianrail_exception(mock_datetime, httpx_m
     mock_datetime.now.return_value.strftime.return_value = "20231024"
     httpx_mock.add_exception(
         httpx.ReadTimeout("Timeout"),
-        url="http://indianrailapi.com/api/v2/livetrainstatus/apikey/test_key/trainnumber/12301/date/20231024/"
+        url="https://indianrailapi.com/api/v2/livetrainstatus/apikey/test_key/trainnumber/12301/date/20231024/"
     )
 
     with patch("backend.services.railways_api.RAPIDAPI_KEY", None), \
@@ -271,7 +271,7 @@ async def test_get_cancelled_trains_exception(mock_datetime, httpx_mock):
 @pytest.mark.asyncio
 async def test_get_trains_between_stations_success(httpx_mock):
     httpx_mock.add_response(
-        url="http://indianrailapi.com/api/v2/TrainBetweenStation/apikey/test_key/From/NDLS/To/HWH",
+        url="https://indianrailapi.com/api/v2/TrainBetweenStation/apikey/test_key/From/NDLS/To/HWH",
         json={"Trains": [{"TrainNo": "88888", "TrainName": "Test Between"}]}
     )
 
@@ -284,7 +284,7 @@ async def test_get_trains_between_stations_success(httpx_mock):
 async def test_get_trains_between_stations_exception(httpx_mock):
     httpx_mock.add_exception(
         httpx.ReadTimeout("Timeout"),
-        url="http://indianrailapi.com/api/v2/TrainBetweenStation/apikey/test_key/From/NDLS/To/HWH"
+        url="https://indianrailapi.com/api/v2/TrainBetweenStation/apikey/test_key/From/NDLS/To/HWH"
     )
 
     with patch("backend.services.railways_api.RAILWAYS_API_KEY", "test_key"):

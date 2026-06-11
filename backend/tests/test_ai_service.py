@@ -24,17 +24,6 @@ async def test_reason_with_ai_empty_anomalies():
 @patch("backend.services.ai_service.llm")
 @patch("backend.services.ai_service.llm_with_tools")
 async def test_reason_with_ai_success(mock_llm_with_tools, mock_llm):
-    expected_response = {
-        "incident_title": "Test Title",
-        "situation_summary": "Test Summary",
-        "reroute_plan": "Test Reroute",
-        "maintenance_task": "Test Maintenance",
-        "operations_task": "Test Operations",
-        "station_manager_task": "Test Station Manager",
-        "passenger_sms": "Test SMS",
-        "incident_summary": "Test Incident Summary"
-    }
-
     from langchain_core.messages import AIMessage
     mock_llm_with_tools.ainvoke = AsyncMock(return_value=AIMessage(content="", tool_calls=[]))
 
