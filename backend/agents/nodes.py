@@ -120,9 +120,10 @@ async def detect_node(state: AgentState) -> AgentState:
         anomalies: List[TrainAnomaly] = []
         raw_data = state.get("raw_train_data", [])
         processed_trains = state.get("processed_trains", [])
+        processed_trains_set = set(processed_trains)
         for train in raw_data:
             train_num = train.get("train_number", "Unknown")
-            if train_num in processed_trains:
+            if train_num in processed_trains_set:
                 continue
             train_name = train.get("train_name", "Unknown")
             location = train.get("current_station") or train.get("source") or "Unknown"
