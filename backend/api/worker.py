@@ -64,8 +64,8 @@ async def run_ingestion_pipeline(ctx):
                 await redis.set("railmind_agent_state", json.dumps(result))
 
         logger.info("Completed scheduled ingestion pipeline run")
-    except Exception as e:
-        logger.error(f"[RAILMIND] Ingestion pipeline error: {e}")
+    except Exception:
+        logger.exception("[RAILMIND] Ingestion pipeline error")
 
 class WorkerSettings:
     functions = [run_ingestion_pipeline]

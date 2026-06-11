@@ -32,8 +32,8 @@ class ConnectionManager:
         try:
             await websocket.send_json({"type": "connection_established", "message": "Connected to RailMind WebSocket"})
             return True
-        except Exception as e:
-            logger.error(f"Error sending connection response: {e}")
+        except Exception:
+            logger.exception("Error sending connection response")
             self.disconnect(websocket)
             return False
 
@@ -45,8 +45,8 @@ class ConnectionManager:
         # Instead of directly sending to WS, publish to Redis so all worker instances receive it
         try:
             await self.redis.publish("railmind_telemetry", message)
-        except Exception as e:
-            logger.error(f"Failed to publish to redis: {e}")
+        except Exception:
+            logger.exception("Failed to publish to redis")
 
     async def start_pubsub_listener(self):
         await self.pubsub.subscribe("railmind_telemetry")
@@ -58,15 +58,15 @@ class ConnectionManager:
                     for connection in self.active_connections:
                         try:
                             await connection.send_text(data)
-                        except Exception as e:
-                            logger.error(f"Error broadcasting to client: {e}")
+                        except Exception:
+                            logger.exception("Error broadcasting to client")
                             failed_connections.append(connection)
                     for connection in failed_connections:
                         self.disconnect(connection)
         except asyncio.CancelledError:
             await self.pubsub.unsubscribe("railmind_telemetry")
-        except Exception as e:
-            logger.error(f"Pubsub listener error: {e}")
+        except Exception:
+            logger.exception("Pubsub listener error")
 
 websocket_manager = ConnectionManager()
 
@@ -77,8 +77,8 @@ async def ping_pong_task(websocket: WebSocket):
             await websocket.send_json({"type": "ping"})
     except asyncio.CancelledError:
         pass
-    except Exception as e:
-        logger.error(f"Ping task error: {e}")
+    except Exception:
+        logger.exception("Ping task error")
 
 async def websocket_endpoint(websocket: WebSocket):
     """
@@ -111,8 +111,8 @@ async def websocket_endpoint(websocket: WebSocket):
             })
     except WebSocketDisconnect:
         websocket_manager.disconnect(websocket)
-    except Exception as e:
-        logger.error(f"WebSocket connection error: {e}")
+    except Exception:
+        logger.exception("WebSocket connection error")
         websocket_manager.disconnect(websocket)
     finally:
         ping_task.cancel()
