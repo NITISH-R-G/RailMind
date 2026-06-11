@@ -1,6 +1,7 @@
 import os
 import json
 import asyncio
+import aiofiles
 from datetime import datetime
 from motor.motor_asyncio import AsyncIOMotorClient # type: ignore
 import logging
@@ -30,37 +31,29 @@ class FallbackDB:
         self.fallback_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fallback_db.json")
         self._lock = asyncio.Lock()
 
-    def _sync_init_fallback_file(self):
+    async def _init_fallback_file(self):
         if not os.path.exists(self.fallback_file):
             try:
-                with open(self.fallback_file, "w") as f:
-                    json.dump({"incidents": [], "department_tasks": []}, f)
+                async with aiofiles.open(self.fallback_file, "w") as f:
+                    await f.write(json.dumps({"incidents": [], "department_tasks": []}))
             except Exception as e:
                 logger.error(f"Failed to initialize fallback file: {e}")
 
-    async def _init_fallback_file(self):
-        await asyncio.to_thread(self._sync_init_fallback_file)
-
-    def _sync_read_fallback(self):
-        self._sync_init_fallback_file()
+    async def _read_fallback(self):
+        await self._init_fallback_file()
         try:
-            with open(self.fallback_file, "r") as f:
-                return json.load(f)
+            async with aiofiles.open(self.fallback_file, "r") as f:
+                content = await f.read()
+                return json.loads(content)
         except Exception:
             return {"incidents": [], "department_tasks": []}
 
-    async def _read_fallback(self):
-        return await asyncio.to_thread(self._sync_read_fallback)
-
-    def _sync_write_fallback(self, data):
+    async def _write_fallback(self, data):
         try:
-            with open(self.fallback_file, "w") as f:
-                json.dump(data, f, indent=2, default=str)
+            async with aiofiles.open(self.fallback_file, "w") as f:
+                await f.write(json.dumps(data, indent=2, default=str))
         except Exception as e:
             logger.error(f"Failed to write to fallback database: {e}")
-
-    async def _write_fallback(self, data):
-        await asyncio.to_thread(self._sync_write_fallback, data)
 
     async def has_recent_incident(self, train_number, minutes=2):
         from datetime import datetime, timedelta
