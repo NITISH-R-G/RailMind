@@ -8,6 +8,8 @@ from dotenv import load_dotenv
 env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
 load_dotenv(dotenv_path=env_path)
 
+from backend.config import settings
+
 from fastapi import FastAPI, WebSocket, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from ..services.db_client import db_client
@@ -17,6 +19,7 @@ from .websocket import websocket_endpoint, websocket_manager # type: ignore
 from ..agents.graph import railmind_graph # type: ignore
 from ..agents.state import AgentState # type: ignore
 from ..services.railways_api import RailwaysAPIClient
+from prometheus_client import make_asgi_app
 
 app = FastAPI(
     title="RailMind Operations API",
@@ -34,7 +37,7 @@ app.add_middleware(
 )
 
 # Initialize railways client for fallback train list queries
-api_key = os.getenv("RAILWAYS_API_KEY", "mock_key")
+api_key = settings.railways_api_key
 railways_client = RailwaysAPIClient(api_key=api_key)
 
 # Global reference storing the most recent loop state from the agent background thread
@@ -198,15 +201,15 @@ async def get_system_status():
         mongo_status = f"Disconnected ({str(e)})"
 
     # Railways API
-    railways_api_key = os.getenv("RAILWAYS_API_KEY", "")
-    rapidapi_key = os.getenv("RAPIDAPI_KEY", "")
-    is_railways_connected = (railways_api_key not in ["", "your_railways_api_key_here"]) or (rapidapi_key not in ["", "your_key_here"])
+    railways_api_key = settings.railways_api_key
+    rapidapi_key = settings.rapidapi_key
+    is_railways_connected = bool(railways_api_key) or bool(rapidapi_key)
     railways_status = "Connected" if is_railways_connected else "Disconnected"
 
     # Twilio SMS
-    twilio_sid = os.getenv("TWILIO_ACCOUNT_SID", "")
-    twilio_token = os.getenv("TWILIO_AUTH_TOKEN", "")
-    is_twilio_connected = twilio_sid not in ["", "mock_sid"] and twilio_token not in ["", "mock_token"]
+    twilio_sid = settings.twilio_account_sid
+    twilio_token = settings.twilio_auth_token
+    is_twilio_connected = bool(twilio_sid) and bool(twilio_token)
     twilio_status = "Connected" if is_twilio_connected else "Disconnected"
 
     return {
@@ -216,11 +219,15 @@ async def get_system_status():
         "twilio_sms": twilio_status,
         "mongodb": mongo_status,
         "contacts": {
-            "maintenance": os.getenv("MAINTENANCE_PHONE", "+919651058174"),
-            "operations": os.getenv("OPERATIONS_PHONE", "+919651058174"),
-            "station_manager": os.getenv("STATION_PHONE", "+919651058174")
+            "maintenance": settings.maintenance_phone,
+            "operations": settings.operations_phone,
+            "station_manager": settings.station_phone
         }
     }
+
+# Mount Prometheus metrics endpoint
+metrics_app = make_asgi_app()
+app.mount("/metrics", metrics_app)
 
 # REST Endpoint: GET /api/telemetry -> returns timing metrics
 @app.get("/api/telemetry")
