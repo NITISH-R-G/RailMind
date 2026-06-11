@@ -37,64 +37,27 @@ app.add_middleware(
 api_key = os.getenv("RAILWAYS_API_KEY", "mock_key")
 railways_client = RailwaysAPIClient(api_key=api_key)
 
-# Global reference storing the most recent loop state from the agent background thread
-latest_agent_state = {
-    "raw_train_data": [],
-    "anomalies": [],
-    "claude_reasoning": "",
-    "reroute_plan": None,
-    "department_tasks": [],
-    "sms_alerts_sent": [],
-    "incident_report": None,
-    "loop_count": 0,
-    "should_continue": False,
-    "last_api_call": "Never",
-    "railways_latency_ms": 0,
-    "ai_latency_ms": 0,
-    "processed_trains": []
-}
+import json
+from .websocket import REDIS_URL
+import redis.asyncio as aioredis # type: ignore
 
-async def run_agent_loop():
-    """
-    Runs the LangGraph agent graph continuously in a background loop.
-    """
-    print("[AGENT LOOP] Starting background autonomous agent runner")
-    
-    while True:
-        try:
-            initial_state = AgentState(
-                raw_train_data=[],
-                anomalies=[],
-                claude_reasoning="",
-                reroute_plan=None,
-                department_tasks=[],
-                sms_alerts_sent=[],
-                incident_report=None,
-                loop_count=latest_agent_state.get("loop_count", 0),
-                should_continue=False,
-                last_api_call=latest_agent_state.get("last_api_call", "Never"),
-                railways_latency_ms=latest_agent_state.get("railways_latency_ms", 0),
-                ai_latency_ms=latest_agent_state.get("ai_latency_ms", 0),
-                processed_trains=latest_agent_state.get("processed_trains", [])
-            )
-            # Invoke graph using ainvoke
-            result = await railmind_graph.ainvoke(initial_state)
-            
-            # Increment loop count on successful iteration
-            if result:
-                result["loop_count"] = result.get("loop_count", 0) + 1
-                # Sync to global object
-                latest_agent_state.update(result)
-        except Exception as e:
-            print(f"[RAILMIND] Agent loop error: {e}")
-        finally:
-            await asyncio.sleep(60)  # Wait 60 seconds between loops (NOT 1s, NOT continuous)
+redis_client = aioredis.from_url(REDIS_URL, decode_responses=True)
+
+async def get_latest_agent_state():
+    """Fetch latest state from Redis, populated by the ARQ worker."""
+    try:
+        state_str = await redis_client.get("railmind_agent_state")
+        if state_str:
+            return json.loads(state_str)
+    except Exception as e:
+        print(f"Error fetching state from redis: {e}")
+    return {}
 
 @app.on_event("startup")
 async def startup_event():
     # Test connection on startup and clean collections:
     try:
-        from ..services.db_client import client, db
+        from ..services.db_client import client, db, init_db_indexes
         await client.admin.command('ping')
         print("[RAILMIND] MongoDB Atlas connected [OK]")
         
@@ -102,11 +65,14 @@ async def startup_event():
         await db.incidents.delete_many({})
         await db.department_tasks.delete_many({})
         print("[RAILMIND] Cleared MongoDB incidents and tasks collections [OK]")
+
+        # Initialize unique and geospatial indices
+        await init_db_indexes()
     except Exception as e:
         print(f"[RAILMIND] MongoDB connection/cleanup failed: {e}")
 
-    # Run the agent workflow loop asynchronously in the background on API startup
-    asyncio.create_task(run_agent_loop())
+    # The manual agent loop has been fully decoupled to the ARQ worker.
+    pass
 
 # Include general REST routers
 app.include_router(router, prefix="/api")
@@ -151,7 +117,8 @@ async def get_incidents_api(all: bool = False):
 # REST Endpoint: GET /api/trains - Fetch current train statuses
 @app.get("/api/trains")
 async def get_trains_api():
-    trains = latest_agent_state.get("raw_train_data", [])
+    state = await get_latest_agent_state()
+    trains = state.get("raw_train_data", [])
     if not trains:
         # Fallback to mock data if empty
         return railways_client.mock_train_data()
@@ -235,11 +202,12 @@ async def get_telemetry_api():
         print(f"Error fetching telemetry metrics: {e}")
         print(f"Error fetching telemetry from MongoDB: {e}")
 
+    state = await get_latest_agent_state()
     return {
         "agent_loop_status": "running",
-        "last_api_call": latest_agent_state.get("last_api_call", "Never"),
-        "railways_latency_ms": latest_agent_state.get("railways_latency_ms", 0),
-        "ai_latency_ms": latest_agent_state.get("ai_latency_ms", 0),
+        "last_api_call": state.get("last_api_call", "Never"),
+        "railways_latency_ms": state.get("railways_latency_ms", 0),
+        "ai_latency_ms": state.get("ai_latency_ms", 0),
         "websocket_clients": len(websocket_manager.active_connections),
         "mongodb_incidents": incident_count,
         "mongodb_tasks": task_count
