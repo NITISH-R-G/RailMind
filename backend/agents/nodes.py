@@ -5,7 +5,7 @@ import time
 from dotenv import load_dotenv
 from typing import List
 from uuid import uuid4
-from datetime import datetime
+from datetime import datetime, timezone
 from ..services.ai_service import reason_with_ai
 from .state import AgentState, TrainAnomaly, DepartmentTask
 from ..services.db_client import db_client
@@ -36,8 +36,8 @@ async def log_agent(node_name: str, message: str):
     try:
         await websocket_manager.broadcast(json.dumps({
             "type": "AGENT_LOG",
-            "message": f"[{datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')}] [{node_name}] {message}",
-            "timestamp": datetime.utcnow().isoformat()
+            "message": f"[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')}] [{node_name}] {message}",
+            "timestamp": datetime.now(timezone.utc).isoformat()
         }))
     except Exception as e:
         logger.error(f"Failed to broadcast AGENT_LOG message: {e}")
@@ -82,7 +82,7 @@ async def ingest_node(state: AgentState) -> AgentState:
 
             latency = int((time.time() - start_time) * 1000)
             state["railways_latency_ms"] = latency
-            state["last_api_call"] = datetime.utcnow().strftime('%H:%M:%S UTC')
+            state["last_api_call"] = datetime.now(timezone.utc).strftime('%H:%M:%S UTC')
 
             if not live_trains:
                 if is_demo:
@@ -134,7 +134,7 @@ async def detect_node(state: AgentState) -> AgentState:
                     "current_station": current_station,
                     "issue_type": "Schedule Delay",
                     "severity": severity,
-                    "timestamp": datetime.utcnow().isoformat(),
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
                     "source": train.get("source", "Unknown"),
                     "destination": train.get("destination", "Unknown")
                 })
@@ -150,7 +150,7 @@ async def detect_node(state: AgentState) -> AgentState:
                     "current_station": current_station,
                     "issue_type": "Congestion Delay",
                     "severity": "high",
-                    "timestamp": datetime.utcnow().isoformat(),
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
                     "source": train.get("source", "Unknown"),
                     "destination": train.get("destination", "Unknown")
                 })
@@ -281,7 +281,7 @@ async def coordination_node(state: AgentState) -> AgentState:
                 "urgency": task["urgency"],
                 "action_required": task["action_required"],
                 "status": "pending",
-                "timestamp": datetime.utcnow()
+                "timestamp": datetime.now(timezone.utc)
             })
 
         try:
@@ -359,8 +359,8 @@ async def alert_node(state: AgentState) -> AgentState:
 
 async def save_incident_if_not_duplicate(db, incident):
     # Check last 5 minutes for same train number
-    from datetime import datetime, timedelta
-    five_mins_ago = datetime.utcnow() - timedelta(minutes=5)
+    from datetime import datetime, timedelta, timezone
+    five_mins_ago = datetime.now(timezone.utc) - timedelta(minutes=5)
     
     existing = await db.incidents.find_one({
         "train_number": incident["train_number"],
@@ -408,7 +408,7 @@ async def report_node(state: AgentState) -> AgentState:
         
         incident_report = {
             "incident_id": incident_id,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "train_number": train_number,
             "train_name": train_name,
             "incident_title": claude_response.get("incident_title") or f"{train_number} {train_name} delayed {delay_minutes}min at {current_station}",

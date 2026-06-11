@@ -8,7 +8,6 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - MONGODB_URI=mongodb://root:example@mongodb:27017/railmind?authSource=admin
       - REDIS_URL=redis://redis:6379
       - OLLAMA_FALLBACK_URL=http://ollama:11434/api/generate
     env_file:
@@ -24,8 +23,8 @@ services:
   mongodb:
     image: mongo:8.0
     environment:
-      - MONGO_INITDB_ROOT_USERNAME=root
-      - MONGO_INITDB_ROOT_PASSWORD=example
+      - MONGO_INITDB_ROOT_USERNAME=${MONGO_INITDB_ROOT_USERNAME:-root}
+      - MONGO_INITDB_ROOT_PASSWORD=${MONGO_INITDB_ROOT_PASSWORD:-default_secure_password_replace_me}
       - MONGO_INITDB_DATABASE=railmind
     ports:
       - "27017:27017"

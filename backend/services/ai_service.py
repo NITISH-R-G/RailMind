@@ -116,9 +116,7 @@ Generate a JSON response:
         "incident_summary": f"Automated incident report logged for train {train_number} at {current_station} with {delay_minutes} minutes delay."
     }
 
-    prompt = f"{system_prompt}
-
-{user_prompt}"
+    prompt = f"{system_prompt}\n\n{user_prompt}"
 
     try:
         response = await call_gemini(prompt)

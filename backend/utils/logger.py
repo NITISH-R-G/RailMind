@@ -11,7 +11,7 @@ def get_json_logger(name: str) -> logging.Logger:
 
     import os
     if not os.path.exists("logs"):
-        os.makedirs("logs")
+        os.makedirs("logs", exist_ok=True)
 
     logHandler = RotatingFileHandler('logs/railmind.log', maxBytes=10*1024*1024, backupCount=5)
     formatter = jsonlogger.JsonFormatter('%(asctime)s %(levelname)s %(name)s %(message)s')
