@@ -147,29 +147,13 @@ async def ws_endpoint(websocket: WebSocket):
 async def get_incidents_api(all: bool = False):
     try:
         from datetime import datetime, timedelta
-        # Fetch up to 1000 incidents
-        incidents = await db_client.get_incidents(limit=1000)
-        if all:
-            return incidents
+        cutoff = None
+        if not all:
+            cutoff = datetime.utcnow() - timedelta(hours=24)
             
-        cutoff = datetime.utcnow() - timedelta(hours=24)
-        filtered = []
-        for inc in incidents:
-            ts_str = inc.get("timestamp")
-            if not ts_str:
-                continue
-            try:
-                if isinstance(ts_str, datetime):
-                    ts = ts_str
-                else:
-                    ts = datetime.fromisoformat(str(ts_str).replace("Z", "+00:00"))
-                if ts.tzinfo is not None:
-                    ts = ts.replace(tzinfo=None)
-                if ts >= cutoff:
-                    filtered.append(inc)
-            except Exception:
-                filtered.append(inc)
-        return filtered
+        # Fetch up to 1000 incidents, filtering at the DB level
+        incidents = await db_client.get_incidents(limit=1000, cutoff=cutoff)
+        return incidents
     except Exception as e:
         print(f"Error fetching incidents: {e}")
         return []
