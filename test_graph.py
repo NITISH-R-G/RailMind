@@ -19,15 +19,22 @@ async def main():
         "sms_alerts_sent": [],
         "incident_report": None,
         "loop_count": 0,
-        "should_continue": False
+        "should_continue": False,
+        "last_api_call": "",
+        "railways_latency_ms": 0,
+        "ai_latency_ms": 0,
+        "processed_trains": [],
+        "next_node": None,
+        "error_vector": None
     }
     
     print("--- Running RailMind Graph test run ---")
     
     # We will step through the graph for a single cycle
-    # Since it loops infinitely back to ingest_node, we can stream the steps and stop after detect_node
     step_count = 0
-    async for event in railmind_graph.astream(initial_state, {"recursion_limit": 20}):
+    config = {"configurable": {"thread_id": "test_thread_1"}, "recursion_limit": 20}
+
+    async for event in railmind_graph.astream(initial_state, config):
         print(f"\n[EVENT] Node complete: {list(event.keys())}")
         for node_name, state_val in event.items():
             print(f"  - Raw trains count: {len(state_val.get('raw_train_data', []))}")

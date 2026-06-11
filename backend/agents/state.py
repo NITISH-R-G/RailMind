@@ -1,4 +1,4 @@
-from typing import TypedDict, List, Optional
+from typing import TypedDict, List, Optional, Annotated
 
 class TrainAnomaly(TypedDict):
     train_number: str
@@ -15,13 +15,31 @@ class DepartmentTask(TypedDict):
     urgency: str
     action_required: str
 
+def reduce_tasks(left: List[DepartmentTask] | None, right: List[DepartmentTask] | None) -> List[DepartmentTask]:
+    if left is None:
+        left = []
+    if right is None:
+        return left
+    if len(right) > 0 and right[0].get("department") == "CLEAR":
+        return []
+    return left + right
+
+def reduce_strings(left: List[str] | None, right: List[str] | None) -> List[str]:
+    if left is None:
+        left = []
+    if right is None:
+        return left
+    if len(right) > 0 and right[0] == "CLEAR":
+        return []
+    return left + right
+
 class AgentState(TypedDict):
     raw_train_data: List[dict]
     anomalies: List[TrainAnomaly]
     claude_reasoning: str
     reroute_plan: Optional[str]
-    department_tasks: List[DepartmentTask]
-    sms_alerts_sent: List[str]
+    department_tasks: Annotated[List[DepartmentTask], reduce_tasks]
+    sms_alerts_sent: Annotated[List[str], reduce_strings]
     incident_report: Optional[str]
     loop_count: int
     should_continue: bool
@@ -30,3 +48,7 @@ class AgentState(TypedDict):
     ai_latency_ms: int
     processed_trains: List[str]
 
+    # Supervisor routing fields
+    next_node: Optional[str]
+    error_vector: Optional[str]
+    last_node_executed: Optional[str]

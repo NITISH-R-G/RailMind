@@ -37,7 +37,57 @@ async def log_agent(node_name: str, message: str):
     except Exception as e:
         logger.error(f"Failed to broadcast AGENT_LOG message: {e}")
 
-async def ingest_node(state: AgentState) -> AgentState:
+async def supervisor_node(state: AgentState) -> dict:
+    await log_agent("supervisor_node", "[RAILMIND] Supervisor evaluating next actions...")
+
+    # If there's an error vector, we need to correct it. Route to reason_node.
+    if state.get("error_vector"):
+        await log_agent("supervisor_node", f"[RAILMIND] Processing error vector: {state['error_vector']}")
+        return {"next_node": "reason_node", "error_vector": None}
+
+    # Track the last node executed to prevent infinite loops when data doesn't change
+    last_node = state.get("last_node_executed", "")
+
+    if not state.get("raw_train_data") and last_node != "ingest_node":
+        return {"next_node": "ingest_node"}
+
+    anomalies = state.get("anomalies", [])
+    if not anomalies:
+        # We have raw data, but no anomalies. Did we run detect?
+        if last_node == "ingest_node" or last_node == "report_node":
+            return {"next_node": "detect_node"}
+        # If we ran detect and still no anomalies, we are done
+        if last_node == "detect_node":
+             return {"next_node": "END"}
+
+    # We have anomalies. Do we have reasoning?
+    if not state.get("claude_reasoning") and last_node not in ["reason_node", "reroute_node", "coordination_node", "alert_node", "report_node"]:
+        return {"next_node": "reason_node"}
+
+    # We have reasoning (or it failed and returned {}). Do we have a reroute plan?
+    if not state.get("reroute_plan") and last_node not in ["reroute_node", "coordination_node", "alert_node", "report_node"]:
+        return {"next_node": "reroute_node"}
+
+    # We have a reroute plan (or failed). Do we have department tasks?
+    if not state.get("department_tasks") and last_node not in ["coordination_node", "alert_node", "report_node"]:
+        return {"next_node": "coordination_node"}
+
+    # We have tasks. Have we sent alerts?
+    if not state.get("sms_alerts_sent") and last_node not in ["alert_node", "report_node"]:
+        return {"next_node": "alert_node"}
+
+    # We have alerted. Generate report.
+    if not state.get("incident_report") and last_node != "report_node":
+        return {"next_node": "report_node"}
+
+    # If we just ran report node, we can start again
+    if last_node == "report_node":
+        return {"next_node": "ingest_node"}
+
+    return {"next_node": "END"}
+
+
+async def ingest_node(state: AgentState) -> dict:
     try:
         await log_agent("ingest_node", "[RAILMIND] Ingesting live train status from API feeds...")
         train_numbers = [
@@ -106,14 +156,19 @@ async def ingest_node(state: AgentState) -> AgentState:
                 "data": train
             }))
         
-        state["raw_train_data"] = live_trains
         await log_agent("ingest_node", f"[RAILMIND] Ingested {len(live_trains)} trains")
+        return {
+            "raw_train_data": live_trains,
+            "last_api_call": state.get("last_api_call", ""),
+            "railways_latency_ms": state.get("railways_latency_ms", 0),
+            "last_node_executed": "ingest_node"
+        }
     except Exception as e:
         logger.error(f"Error in ingest_node: {e}")
         await log_agent("ingest_node", f"[RAILMIND] [ERROR] Ingest node failed: {e}")
-    return state
+        return {"error_vector": f"Ingest failed: {str(e)}"}
 
-async def detect_node(state: AgentState) -> AgentState:
+async def detect_node(state: AgentState) -> dict:
     try:
         await log_agent("detect_node", "[RAILMIND] Running real-time anomaly detection rules...")
         anomalies: List[TrainAnomaly] = []
@@ -187,28 +242,29 @@ async def detect_node(state: AgentState) -> AgentState:
                     "destination": train.get("destination") or "Unknown"
                 })
                 
-        state["anomalies"] = anomalies
         n = len(anomalies)
         if n > 0:
             await log_agent("detect_node", f"[RAILMIND] [WARNING] Detected {n} anomalies")
-            state["should_continue"] = True
+            return {"anomalies": anomalies, "should_continue": True, "last_node_executed": "detect_node"}
         else:
             await log_agent("detect_node", "[RAILMIND] [OK] All trains nominal")
-            state["should_continue"] = False
+            return {"anomalies": [], "should_continue": False, "last_node_executed": "detect_node"}
     except Exception as e:
         logger.error(f"Error in detect_node: {e}")
         await log_agent("detect_node", f"[RAILMIND] [ERROR] Detect node failed: {e}")
-    return state
+        return {"error_vector": f"Detect failed: {str(e)}"}
 
-async def reason_node(state: AgentState) -> AgentState:
+async def reason_node(state: AgentState) -> dict:
     try:
         anomalies = state.get("anomalies", [])
         if not anomalies:
-            state["claude_reasoning"] = "{}"
-            state["reroute_plan"] = None
-            state["incident_report"] = None
             await log_agent("reason_node", "[RAILMIND] [OK] All trains nominal, skipping AI reasoning")
-            return state
+            return {
+                "claude_reasoning": "{}",
+                "reroute_plan": None,
+                "incident_report": None,
+                "last_node_executed": "reason_node"
+            }
 
         await log_agent("reason_node", f"[RAILMIND] Contacting AI to reason about {len(anomalies)} anomalies...")
         
@@ -218,30 +274,123 @@ async def reason_node(state: AgentState) -> AgentState:
         result = await reason_with_ai(anomalies)
         
         latency = int((time.time() - start_time) * 1000)
-        state["ai_latency_ms"] = latency
         
         if result:
-            state["claude_reasoning"] = json.dumps(result)
-            state["reroute_plan"] = result.get("reroute_plan")
-            state["incident_report"] = result.get("incident_summary")
             await log_agent("reason_node", f"[RAILMIND] AI reasoning: {result.get('situation_summary')}")
+            return {
+                "claude_reasoning": json.dumps(result),
+                "ai_latency_ms": latency,
+                "reroute_plan": result.get("reroute_plan"),
+                "incident_report": result.get("incident_summary"),
+                "last_node_executed": "reason_node"
+            }
         else:
-            state["claude_reasoning"] = "{}"
             await log_agent("reason_node", "[RAILMIND] AI reasoning failed — using defaults")
+            return {
+                "claude_reasoning": "{}",
+                "ai_latency_ms": latency,
+                "last_node_executed": "reason_node"
+            }
     except Exception as e:
         logger.error(f"Error in reason_node: {e}")
         await log_agent("reason_node", f"[RAILMIND] [ERROR] Reason node failed: {e}")
-    return state
+        return {"error_vector": f"Reasoning failed: {str(e)}"}
 
-async def reroute_node(state: AgentState) -> AgentState:
+import heapq
+import math
+
+def heuristic(a: tuple, b: tuple) -> float:
+    # simple euclidean distance for demo
+    return math.sqrt((b[0] - a[0])**2 + (b[1] - a[1])**2)
+
+async def a_star_search(start: str, goal: str, graph: dict) -> list:
+    if start not in graph or goal not in graph:
+        return []
+
+    # Coordinates of stations for heuristic
+    coords = {
+        "Kanpur": (26.4499, 80.3319),
+        "NDLS": (28.6139, 77.2090),
+        "Agra": (27.1767, 78.0081),
+        "Lucknow": (26.8467, 80.9462),
+        "Aligarh": (27.8974, 78.0880)
+    }
+
+    frontier = []
+    heapq.heappush(frontier, (0, start))
+    came_from = {start: None}
+    cost_so_far = {start: 0}
+
+    while frontier:
+        _, current = heapq.heappop(frontier)
+
+        if current == goal:
+            break
+
+        for next_node in graph.get(current, []):
+            # mock distance weight 1
+            new_cost = cost_so_far[current] + 1
+            if next_node not in cost_so_far or new_cost < cost_so_far[next_node]:
+                cost_so_far[next_node] = new_cost
+                priority = new_cost + heuristic(coords.get(next_node, (0,0)), coords.get(goal, (0,0)))
+                heapq.heappush(frontier, (priority, next_node))
+                came_from[next_node] = current
+
+    if goal not in came_from:
+        return []
+
+    path = []
+    current = goal
+    while current != start:
+        path.append(current)
+        current = came_from[current]
+    path.append(start)
+    path.reverse()
+    return path
+
+async def reroute_node(state: AgentState) -> dict:
     try:
-        await log_agent("reroute_node", "[RAILMIND] Checking and resolving rerouting options...")
+        await log_agent("reroute_node", "[RAILMIND] Checking and resolving rerouting options with A*...")
+
+        # Mock rail network graph
+        rail_graph = {
+            "Kanpur": ["Lucknow", "Agra"],
+            "Lucknow": ["Kanpur"],
+            "Agra": ["Kanpur", "Aligarh"],
+            "Aligarh": ["Agra", "NDLS"],
+            "NDLS": ["Aligarh"]
+        }
+
+        reroute_plan = "Proceed on current path."
+
+        anomalies = state.get("anomalies", [])
+        if anomalies:
+            train = anomalies[0]
+            current_station = train.get("current_station", train.get("location", "Kanpur"))
+            # Just an example target
+            target = "NDLS"
+
+            if current_station in rail_graph and target in rail_graph:
+                path = await a_star_search(current_station, target, rail_graph)
+                if path:
+                    reroute_plan = f"A* Reroute computed: {' -> '.join(path)}"
+                else:
+                    reroute_plan = "No alternate A* path found."
+            else:
+                claude_json = state.get("claude_reasoning", "{}")
+                try:
+                    claude_response = json.loads(claude_json)
+                    reroute_plan = claude_response.get("reroute_plan", "Fallback reroute generated.")
+                except:
+                    reroute_plan = "Fallback reroute generated."
+
+        return {"reroute_plan": reroute_plan, "last_node_executed": "reroute_node"}
     except Exception as e:
         logger.error(f"Error in reroute_node: {e}")
         await log_agent("reroute_node", f"[RAILMIND] [ERROR] Reroute node failed: {e}")
-    return state
+        return {"error_vector": f"Reroute failed: {str(e)}"}
 
-async def coordination_node(state: AgentState) -> AgentState:
+async def coordination_node(state: AgentState) -> dict:
     try:
         await log_agent("coordination_node", "[RAILMIND] Initiating department task dispatches...")
         claude_json = state.get("claude_reasoning", "{}")
@@ -289,7 +438,6 @@ async def coordination_node(state: AgentState) -> AgentState:
         }
 
         department_tasks = [maintenance_task, operations_task, station_manager_task]
-        state["department_tasks"] = department_tasks
 
         # Save to MongoDB
         incident_uuid = str(uuid4())
@@ -311,12 +459,13 @@ async def coordination_node(state: AgentState) -> AgentState:
             logger.warning(f"Failed to save department tasks to MongoDB: {e}")
 
         await log_agent("coordination_node", "[RAILMIND] Dispatched tasks to 3 departments simultaneously")
+        return {"department_tasks": department_tasks, "last_node_executed": "coordination_node"}
     except Exception as e:
         logger.error(f"Error in coordination_node: {e}")
         await log_agent("coordination_node", f"[RAILMIND] [ERROR] Coordination node failed: {e}")
-    return state
+        return {"error_vector": f"Coordination failed: {str(e)}"}
 
-async def alert_node(state: AgentState) -> AgentState:
+async def alert_node(state: AgentState) -> dict:
     try:
         await log_agent("alert_node", "[RAILMIND] Sending Twilio notifications...")
         m_phone = os.getenv("MAINTENANCE_PHONE", "+1234567891")
@@ -364,12 +513,12 @@ async def alert_node(state: AgentState) -> AgentState:
             except Exception as e:
                 logger.error(f"Error sending passenger SMS: {e}")
 
-        state["sms_alerts_sent"] = sent_sms
         await log_agent("alert_node", f"[RAILMIND] SMS alerts sent to {len(sent_sms)} recipients")
+        return {"sms_alerts_sent": sent_sms, "last_node_executed": "alert_node"}
     except Exception as e:
         logger.error(f"Error in alert_node: {e}")
         await log_agent("alert_node", f"[RAILMIND] [ERROR] Alert node failed: {e}")
-    return state
+        return {"error_vector": f"Alert failed: {str(e)}"}
 
 async def save_incident_if_not_duplicate(db, incident):
     # Check last 5 minutes for same train number
@@ -396,13 +545,13 @@ async def save_incident_if_not_duplicate(db, incident):
           f"{incident['incident_title']}")
     return True
 
-async def report_node(state: AgentState) -> AgentState:
+async def report_node(state: AgentState) -> dict:
     try:
         await log_agent("report_node", "[RAILMIND] Broadcasting operations report...")
         
         anomalies = state.get("anomalies", [])
         if not anomalies:
-            return state
+            return {"last_node_executed": "report_node"}
             
         anomaly = anomalies[0]
         train_number = anomaly.get("train_number", "Unknown")
@@ -458,18 +607,21 @@ async def report_node(state: AgentState) -> AgentState:
         # Mark this train as recently processed in state
         processed_trains = state.get("processed_trains", [])
         processed_trains.append(anomaly["train_number"])
-        state["processed_trains"] = processed_trains
-
-        # Reset state fields
-        state["anomalies"] = []
-        state["department_tasks"] = []
-        state["sms_alerts_sent"] = []
-        state["loop_count"] = state.get("loop_count", 0) + 1
 
         import asyncio
         await log_agent("report_node", "[RAILMIND] Sleeping for 10 seconds before next iteration...")
         await asyncio.sleep(10)
+
+        return {
+            "processed_trains": processed_trains,
+            "anomalies": [],
+            "department_tasks": [{"department": "CLEAR"}],
+            "sms_alerts_sent": ["CLEAR"],
+            "loop_count": state.get("loop_count", 0) + 1,
+            "incident_report": str(incident_report),
+            "last_node_executed": "report_node"
+        }
     except Exception as e:
         logger.error(f"Error in report_node: {e}")
         await log_agent("report_node", f"[RAILMIND] [ERROR] Report node failed: {e}")
-    return state
+        return {"error_vector": f"Report failed: {str(e)}"}
