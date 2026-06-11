@@ -9,12 +9,33 @@ async def test_reason_with_ai_empty_anomalies():
     assert result == {}
 
 @pytest.mark.asyncio
-@patch("backend.services.ai_service.client.aio.models.generate_content", new_callable=AsyncMock)
-async def test_reason_with_ai_success(mock_generate_content):
+async def test_reason_with_ai_none_anomalies():
+    result = await reason_with_ai(None)
+    assert result == {}
+
+@pytest.mark.asyncio
+async def test_reason_with_ai_success():
+    mock_tools_invoke = AsyncMock()
+    mock_structured_invoke = AsyncMock()
+
+    import backend.services.ai_service
+
+    original_llm_with_tools = backend.services.ai_service.llm_with_tools
+    original_llm = backend.services.ai_service.llm
+
+    mock_llm_with_tools = MagicMock()
+    mock_llm_with_tools.ainvoke = mock_tools_invoke
+    backend.services.ai_service.llm_with_tools = mock_llm_with_tools
+
+    mock_llm = MagicMock()
+    mock_structured_llm = MagicMock()
+    mock_structured_llm.ainvoke = mock_structured_invoke
+    mock_llm.with_structured_output.return_value = mock_structured_llm
+    backend.services.ai_service.llm = mock_llm
+
     expected_response = {
         "incident_title": "Test Title",
         "situation_summary": "Test Summary",
-        "reroute_plan": "Test Reroute",
         "maintenance_task": "Test Maintenance",
         "operations_task": "Test Operations",
         "station_manager_task": "Test Station Manager",
@@ -22,36 +43,99 @@ async def test_reason_with_ai_success(mock_generate_content):
         "incident_summary": "Test Incident Summary"
     }
 
-    mock_response = MagicMock()
-    mock_response.text = json.dumps(expected_response)
-    mock_generate_content.return_value = mock_response
+    from langchain_core.messages import AIMessage
+    mock_res = AIMessage(content="Test content")
+    mock_res.tool_calls = []
+    mock_tools_invoke.return_value = mock_res
+
+    from backend.services.ai_service import MitigationPlan
+    mock_plan = MitigationPlan(**expected_response)
+    mock_structured_invoke.return_value = mock_plan
 
     anomalies = [{"train_name": "Test Train", "train_number": "123", "delay_minutes": 10}]
-    result = await reason_with_ai(anomalies)
 
-    assert result == expected_response
-    mock_generate_content.assert_called_once()
+    try:
+        result = await reason_with_ai(anomalies)
+
+        assert result == expected_response
+        mock_tools_invoke.assert_called_once()
+        mock_structured_invoke.assert_called_once()
+    finally:
+        backend.services.ai_service.llm_with_tools = original_llm_with_tools
+        backend.services.ai_service.llm = original_llm
 
 @pytest.mark.asyncio
-@patch("backend.services.ai_service.client.aio.models.generate_content", new_callable=AsyncMock)
-async def test_reason_with_ai_fallback_json_error(mock_generate_content):
-    mock_response = MagicMock()
-    mock_response.text = "Invalid JSON string"
-    mock_generate_content.return_value = mock_response
+async def test_reason_with_ai_fallback_json_error():
+    mock_tools_invoke = AsyncMock()
+    mock_structured_invoke = AsyncMock()
+
+    import backend.services.ai_service
+
+    original_llm_with_tools = backend.services.ai_service.llm_with_tools
+    original_llm = backend.services.ai_service.llm
+
+    mock_llm_with_tools = MagicMock()
+    mock_llm_with_tools.ainvoke = mock_tools_invoke
+    backend.services.ai_service.llm_with_tools = mock_llm_with_tools
+
+    mock_llm = MagicMock()
+    mock_structured_llm = MagicMock()
+    mock_structured_llm.ainvoke = mock_structured_invoke
+    mock_llm.with_structured_output.return_value = mock_structured_llm
+    backend.services.ai_service.llm = mock_llm
+
+    from langchain_core.messages import AIMessage
+    mock_res = AIMessage(content="Test content")
+    mock_res.tool_calls = []
+    mock_tools_invoke.return_value = mock_res
+
+    mock_structured_invoke.side_effect = ValueError("Invalid JSON string")
 
     anomalies = [{"train_name": "Test Train", "train_number": "123", "delay_minutes": 10}]
-    result = await reason_with_ai(anomalies)
 
-    assert "incident_title" in result
-    assert result["incident_title"] == "123 Test Train delayed 10min at Unknown Station"
+    try:
+        result = await reason_with_ai(anomalies)
+
+        assert "incident_title" in result
+        assert result["incident_title"] == "123 Test Train delayed 10min at Unknown Station"
+    finally:
+        backend.services.ai_service.llm_with_tools = original_llm_with_tools
+        backend.services.ai_service.llm = original_llm
 
 @pytest.mark.asyncio
-@patch("backend.services.ai_service.client.aio.models.generate_content", new_callable=AsyncMock)
-async def test_reason_with_ai_fallback_exception(mock_generate_content):
-    mock_generate_content.side_effect = Exception("API Error")
+async def test_reason_with_ai_fallback_exception():
+    mock_tools_invoke = AsyncMock()
+    mock_structured_invoke = AsyncMock()
+
+    import backend.services.ai_service
+
+    original_llm_with_tools = backend.services.ai_service.llm_with_tools
+    original_llm = backend.services.ai_service.llm
+
+    mock_llm_with_tools = MagicMock()
+    mock_llm_with_tools.ainvoke = mock_tools_invoke
+    backend.services.ai_service.llm_with_tools = mock_llm_with_tools
+
+    mock_llm = MagicMock()
+    mock_structured_llm = MagicMock()
+    mock_structured_llm.ainvoke = mock_structured_invoke
+    mock_llm.with_structured_output.return_value = mock_structured_llm
+    backend.services.ai_service.llm = mock_llm
+
+    from langchain_core.messages import AIMessage
+    mock_res = AIMessage(content="Test content")
+    mock_res.tool_calls = []
+    mock_tools_invoke.return_value = mock_res
+
+    mock_structured_invoke.side_effect = Exception("API Error")
 
     anomalies = [{"train_name": "Test Train", "train_number": "123", "delay_minutes": 10}]
-    result = await reason_with_ai(anomalies)
 
-    assert "incident_title" in result
-    assert result["incident_title"] == "123 Test Train delayed 10min at Unknown Station"
+    try:
+        result = await reason_with_ai(anomalies)
+
+        assert "incident_title" in result
+        assert result["incident_title"] == "123 Test Train delayed 10min at Unknown Station"
+    finally:
+        backend.services.ai_service.llm_with_tools = original_llm_with_tools
+        backend.services.ai_service.llm = original_llm
