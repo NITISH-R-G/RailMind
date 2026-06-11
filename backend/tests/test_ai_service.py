@@ -3,21 +3,10 @@ import json
 from unittest.mock import patch, AsyncMock, MagicMock
 from backend.services.ai_service import reason_with_ai
 
-@pytest.mark.asyncio
-async def test_reason_with_ai_empty_anomalies():
-    result = await reason_with_ai([])
-    assert result == {}
+from contextlib import asynccontextmanager
 
-@pytest.mark.asyncio
-async def test_reason_with_ai_none_anomalies():
-    result = await reason_with_ai(None)
-    assert result == {}
-
-@pytest.mark.asyncio
-async def test_reason_with_ai_success():
-    mock_tools_invoke = AsyncMock()
-    mock_structured_invoke = AsyncMock()
-
+@asynccontextmanager
+async def mock_llm_setup(mock_tools_invoke, mock_structured_invoke):
     import backend.services.ai_service
 
     original_llm_with_tools = backend.services.ai_service.llm_with_tools
@@ -32,6 +21,27 @@ async def test_reason_with_ai_success():
     mock_structured_llm.ainvoke = mock_structured_invoke
     mock_llm.with_structured_output.return_value = mock_structured_llm
     backend.services.ai_service.llm = mock_llm
+
+    try:
+        yield
+    finally:
+        backend.services.ai_service.llm_with_tools = original_llm_with_tools
+        backend.services.ai_service.llm = original_llm
+
+@pytest.mark.asyncio
+async def test_reason_with_ai_empty_anomalies():
+    result = await reason_with_ai([])
+    assert result == {}
+
+@pytest.mark.asyncio
+async def test_reason_with_ai_none_anomalies():
+    result = await reason_with_ai(None)
+    assert result == {}
+
+@pytest.mark.asyncio
+async def test_reason_with_ai_success():
+    mock_tools_invoke = AsyncMock()
+    mock_structured_invoke = AsyncMock()
 
     expected_response = {
         "incident_title": "Test Title",
@@ -54,35 +64,17 @@ async def test_reason_with_ai_success():
 
     anomalies = [{"train_name": "Test Train", "train_number": "123", "delay_minutes": 10}]
 
-    try:
+    async with mock_llm_setup(mock_tools_invoke, mock_structured_invoke):
         result = await reason_with_ai(anomalies)
 
         assert result == expected_response
         mock_tools_invoke.assert_called_once()
         mock_structured_invoke.assert_called_once()
-    finally:
-        backend.services.ai_service.llm_with_tools = original_llm_with_tools
-        backend.services.ai_service.llm = original_llm
 
 @pytest.mark.asyncio
 async def test_reason_with_ai_fallback_json_error():
     mock_tools_invoke = AsyncMock()
     mock_structured_invoke = AsyncMock()
-
-    import backend.services.ai_service
-
-    original_llm_with_tools = backend.services.ai_service.llm_with_tools
-    original_llm = backend.services.ai_service.llm
-
-    mock_llm_with_tools = MagicMock()
-    mock_llm_with_tools.ainvoke = mock_tools_invoke
-    backend.services.ai_service.llm_with_tools = mock_llm_with_tools
-
-    mock_llm = MagicMock()
-    mock_structured_llm = MagicMock()
-    mock_structured_llm.ainvoke = mock_structured_invoke
-    mock_llm.with_structured_output.return_value = mock_structured_llm
-    backend.services.ai_service.llm = mock_llm
 
     from langchain_core.messages import AIMessage
     mock_res = AIMessage(content="Test content")
@@ -93,34 +85,16 @@ async def test_reason_with_ai_fallback_json_error():
 
     anomalies = [{"train_name": "Test Train", "train_number": "123", "delay_minutes": 10}]
 
-    try:
+    async with mock_llm_setup(mock_tools_invoke, mock_structured_invoke):
         result = await reason_with_ai(anomalies)
 
         assert "incident_title" in result
         assert result["incident_title"] == "123 Test Train delayed 10min at Unknown Station"
-    finally:
-        backend.services.ai_service.llm_with_tools = original_llm_with_tools
-        backend.services.ai_service.llm = original_llm
 
 @pytest.mark.asyncio
 async def test_reason_with_ai_fallback_exception():
     mock_tools_invoke = AsyncMock()
     mock_structured_invoke = AsyncMock()
-
-    import backend.services.ai_service
-
-    original_llm_with_tools = backend.services.ai_service.llm_with_tools
-    original_llm = backend.services.ai_service.llm
-
-    mock_llm_with_tools = MagicMock()
-    mock_llm_with_tools.ainvoke = mock_tools_invoke
-    backend.services.ai_service.llm_with_tools = mock_llm_with_tools
-
-    mock_llm = MagicMock()
-    mock_structured_llm = MagicMock()
-    mock_structured_llm.ainvoke = mock_structured_invoke
-    mock_llm.with_structured_output.return_value = mock_structured_llm
-    backend.services.ai_service.llm = mock_llm
 
     from langchain_core.messages import AIMessage
     mock_res = AIMessage(content="Test content")
@@ -131,11 +105,8 @@ async def test_reason_with_ai_fallback_exception():
 
     anomalies = [{"train_name": "Test Train", "train_number": "123", "delay_minutes": 10}]
 
-    try:
+    async with mock_llm_setup(mock_tools_invoke, mock_structured_invoke):
         result = await reason_with_ai(anomalies)
 
         assert "incident_title" in result
         assert result["incident_title"] == "123 Test Train delayed 10min at Unknown Station"
-    finally:
-        backend.services.ai_service.llm_with_tools = original_llm_with_tools
-        backend.services.ai_service.llm = original_llm
