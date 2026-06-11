@@ -1,5 +1,5 @@
 from typing import TypedDict, List, Optional, Annotated
-import operator
+
 
 def append_to_list(a: Optional[List], b: Optional[List]) -> List:
     if a is None:
@@ -7,6 +7,7 @@ def append_to_list(a: Optional[List], b: Optional[List]) -> List:
     if b is None:
         b = []
     return a + b
+
 
 class TrainAnomaly(TypedDict):
     train_number: str
@@ -17,11 +18,13 @@ class TrainAnomaly(TypedDict):
     delay_minutes: Optional[int]
     passenger_load: Optional[str]
 
+
 class DepartmentTask(TypedDict):
     department: str    # "maintenance", "operations", "station_manager"
     task_description: str
     urgency: str
     action_required: str
+
 
 class AgentState(TypedDict):
     raw_train_data: List[dict]
@@ -39,5 +42,5 @@ class AgentState(TypedDict):
     processed_trains: List[str]
     errors: Annotated[List[str], append_to_list]
     next_node: str
-    messages: Annotated[list, operator.add]
+    messages: Annotated[list, append_to_list]
     tools_used: Annotated[List[str], append_to_list]
