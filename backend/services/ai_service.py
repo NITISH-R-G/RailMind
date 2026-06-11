@@ -111,7 +111,7 @@ Previous errors from Supervisor (if any, please correct your plan):
     structured_llm = llm.with_structured_output(MitigationPlan)
     try:
         final_plan: MitigationPlan = await structured_llm.ainvoke(messages)
-        return final_plan.dict()
+        return final_plan.model_dump()
     except Exception as e:
         print(f"[RAILMIND] LLM failed to produce structured output: {e}")
         return {
