@@ -33,7 +33,7 @@ class FallbackDB:
     def _sync_init_fallback_file(self):
         if not os.path.exists(self.fallback_file):
             try:
-                with open(self.fallback_file, "w") as f:
+                with open(self.fallback_file, "w", encoding="utf-8") as f:
                     json.dump({"incidents": [], "department_tasks": []}, f)
             except Exception as e:
                 logger.error(f"Failed to initialize fallback file: {e}")
@@ -44,7 +44,7 @@ class FallbackDB:
     def _sync_read_fallback(self):
         self._sync_init_fallback_file()
         try:
-            with open(self.fallback_file, "r") as f:
+            with open(self.fallback_file, "r", encoding="utf-8") as f:
                 return json.load(f)
         except Exception:
             return {"incidents": [], "department_tasks": []}
@@ -54,7 +54,7 @@ class FallbackDB:
 
     def _sync_write_fallback(self, data):
         try:
-            with open(self.fallback_file, "w") as f:
+            with open(self.fallback_file, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2, default=str)
         except Exception as e:
             logger.error(f"Failed to write to fallback database: {e}")
@@ -63,8 +63,8 @@ class FallbackDB:
         await asyncio.to_thread(self._sync_write_fallback, data)
 
     async def has_recent_incident(self, train_number, minutes=2):
-        from datetime import datetime, timedelta
-        cutoff = datetime.utcnow() - timedelta(minutes=minutes)
+        from datetime import datetime, timedelta, timezone
+        cutoff = datetime.now(timezone.utc) - timedelta(minutes=minutes)
         
         if not self.use_fallback:
             try:
