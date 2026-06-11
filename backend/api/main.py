@@ -1,18 +1,21 @@
 import os
 import uvicorn
 from dotenv import load_dotenv
+from fastapi import FastAPI, WebSocket, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from ..services.db_client import db_client
+from .routes import router
+from .websocket import websocket_endpoint, websocket_manager # type: ignore
+from ..services.railways_api import RailwaysAPIClient
+import json
+from .websocket import REDIS_URL
+import redis.asyncio as aioredis # type: ignore
 
 # Ensure env variables are loaded before imports
 env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
 load_dotenv(dotenv_path=env_path)
 
-from fastapi import FastAPI, WebSocket, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from ..services.db_client import db_client
 
-from .routes import router
-from .websocket import websocket_endpoint, websocket_manager # type: ignore
-from ..services.railways_api import RailwaysAPIClient
 
 app = FastAPI(
     title="RailMind Operations API",
@@ -33,9 +36,6 @@ app.add_middleware(
 api_key = os.getenv("RAILWAYS_API_KEY", "mock_key")
 railways_client = RailwaysAPIClient(api_key=api_key)
 
-import json
-from .websocket import REDIS_URL
-import redis.asyncio as aioredis # type: ignore
 
 redis_client = aioredis.from_url(REDIS_URL, decode_responses=True)
 

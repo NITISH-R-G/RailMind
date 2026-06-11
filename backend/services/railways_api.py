@@ -160,7 +160,7 @@ def parse_rapidapi_train_for_agent(data: dict, train_number: str) -> dict:
     delay_minutes = 0
     try:
         delay_minutes = int(outer_data.get("delay", 0))
-    except:
+    except Exception:
         pass
         
     title = str(outer_data.get("title", ""))
@@ -630,7 +630,7 @@ def parse_train_for_agent(data: dict, train_number: str) -> dict:
     delay_str = current.get("DelayInArrival", "0 M")
     try:
         delay_minutes = int(delay_str.split()[0]) if delay_str not in ["-", "00 M"] else 0
-    except:
+    except Exception:
         delay_minutes = 0
     
     passenger_load = _determine_passenger_load(delay_minutes)

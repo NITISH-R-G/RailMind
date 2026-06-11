@@ -1,3 +1,4 @@
+import pymongo
 import os
 import json
 import logging
@@ -371,7 +372,6 @@ async def alert_node(state: AgentState) -> AgentState:
         await log_agent("alert_node", f"[RAILMIND] [ERROR] Alert node failed: {e}")
     return state
 
-import pymongo # type: ignore
 
 async def save_incident_if_not_duplicate(db, incident):
     from datetime import datetime
