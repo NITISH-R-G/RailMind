@@ -11,7 +11,7 @@ RAILWAYS_API_KEY = os.getenv("RAILWAYS_API_KEY")
 RAPIDAPI_KEY = os.getenv("RAPIDAPI_KEY")
 RAPIDAPI_HOST = os.getenv("RAPIDAPI_HOST", "irctc1.p.rapidapi.com")
 
-BASE_URL = "http://indianrailapi.com/api/v2"
+BASE_URL = "https://indianrailapi.com/api/v2"
 
 STATION_COORDS = {
     # North India
@@ -584,7 +584,7 @@ async def get_cancelled_trains() -> list:
     ]
 
 async def get_trains_between_stations(from_code: str, to_code: str) -> list:
-    url = f"http://indianrailapi.com/api/v2/TrainBetweenStation/apikey/{RAILWAYS_API_KEY}/From/{from_code}/To/{to_code}"
+    url = f"https://indianrailapi.com/api/v2/TrainBetweenStation/apikey/{RAILWAYS_API_KEY}/From/{from_code}/To/{to_code}"
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             response = await client.get(url)
