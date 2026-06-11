@@ -10,3 +10,8 @@ twilio
 httpx
 websockets
 google-genai
+
+prometheus-client
+python-json-logger
+pydantic-settings
+circuitbreaker

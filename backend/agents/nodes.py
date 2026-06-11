@@ -1,6 +1,7 @@
 import os
 import json
 import logging
+import time
 from dotenv import load_dotenv
 from typing import List
 from uuid import uuid4
@@ -11,23 +12,27 @@ from ..services.db_client import db_client
 from ..services.railways_api import get_cancelled_trains, mock_train_data, RailwaysAPIClient, get_multiple_trains
 from ..services.twilio_service import TwilioSMSClient
 from ..api.websocket import websocket_manager
+from backend.utils.logger import get_json_logger
+from backend.utils.metrics import LANGGRAPH_NODE_LATENCY, LANGGRAPH_ERROR_COUNT
 
-logger = logging.getLogger(__name__)
+logger = get_json_logger(__name__)
+
+from backend.config import settings
 
 # Ensure env variables are loaded before configuration
 env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
 load_dotenv(dotenv_path=env_path)
-api_key = os.getenv("RAILWAYS_API_KEY", "mock_key")
+api_key = settings.railways_api_key
 railways_client = RailwaysAPIClient(api_key=api_key)
 
-twilio_sid = os.getenv("TWILIO_ACCOUNT_SID", "mock_sid")
-twilio_token = os.getenv("TWILIO_AUTH_TOKEN", "mock_token")
-twilio_from = os.getenv("TWILIO_PHONE_NUMBER", "+1234567890")
+twilio_sid = settings.twilio_account_sid
+twilio_token = settings.twilio_auth_token
+twilio_from = settings.twilio_phone_number
 twilio_client = TwilioSMSClient(account_sid=twilio_sid, auth_token=twilio_token, from_number=twilio_from)
 
 # Shared log assistant that prints logs and broadcasts AGENT_LOG WebSocket events (ISSUE 4)
 async def log_agent(node_name: str, message: str):
-    print(message)
+    logger.info(message, extra={"node_name": node_name})
     try:
         await websocket_manager.broadcast(json.dumps({
             "type": "AGENT_LOG",
@@ -38,6 +43,7 @@ async def log_agent(node_name: str, message: str):
         logger.error(f"Failed to broadcast AGENT_LOG message: {e}")
 
 async def ingest_node(state: AgentState) -> AgentState:
+    start_time_metric = time.time()
     try:
         await log_agent("ingest_node", "[RAILMIND] Ingesting live train status from API feeds...")
         train_numbers = [
@@ -46,74 +52,59 @@ async def ingest_node(state: AgentState) -> AgentState:
             "12309", "12721", "12229", "12311", "12641"
         ]
         
-        import time
         start_time = time.time()
         
         client = railways_client
-        print(f"[RAILMIND] Calling Railways API for {len(train_numbers)} trains...")
-        results = await client.get_multiple_trains(train_numbers)
         
-        # Ensure that if some train fetches failed and returned empty dict, they fallback to get_mock_rapidapi_train
-        # So we always have all 15 trains
-        train_results = []
-        for tn in train_numbers:
-            found = False
-            for r in results:
-                if r.get("train_number") == tn:
-                    train_results.append(r)
-                    found = True
-                    break
-            if not found:
-                from ..services.railways_api import get_mock_rapidapi_train, parse_rapidapi_train_for_agent
-                mock_data = get_mock_rapidapi_train(tn)
-                parsed_mock = parse_rapidapi_train_for_agent(mock_data, tn)
-                if parsed_mock:
-                    train_results.append(parsed_mock)
-        
-        results = train_results
-        
-        latency = int((time.time() - start_time) * 1000)
-        state["last_api_call"] = datetime.utcnow().isoformat()
-        state["railways_latency_ms"] = latency
-        
-        print(f"[RAILMIND] API returned {len(results)} trains")
-        print(f"[RAILMIND] Sample: {results[0] if results else 'EMPTY - using mock'}")
-        
-        if not results:
+        # Determine if we should mock based on actual env vars, not just string presence
+        import os
+        is_demo = os.getenv("DEMO_MODE", "false").lower() == "true"
+        valid_api_key = False
+        r_key = os.getenv("RAILWAYS_API_KEY")
+        if r_key and r_key not in ["", "your_railways_api_key_here", "mock_key"]:
+            valid_api_key = True
+
+        rapid_key = os.getenv("RAPIDAPI_KEY")
+        if rapid_key and rapid_key not in ["", "your_key_here"]:
+            valid_api_key = True
+
+        if not valid_api_key:
             print("[RAILMIND] WARNING: Railways API returned no data, check RAILWAYS_API_KEY in .env")
             await log_agent("ingest_node", "[RAILMIND] WARNING: Railways API returned no data, check RAILWAYS_API_KEY in .env")
-            results = mock_train_data()
-            print("[RAILMIND] Using mock fallback data")
-            await log_agent("ingest_node", "[RAILMIND] Using mock fallback data")
+            if is_demo:
+                await log_agent("ingest_node", "[RAILMIND] Using fallback mock data for testing")
+                live_trains = client.mock_train_data()
+            else:
+                live_trains = []
+        else:
+            await log_agent("ingest_node", f"[RAILMIND] Calling Railways API for {len(train_numbers)} trains...")
+            live_trains = await client.get_multiple_trains(train_numbers)
+
+            latency = int((time.time() - start_time) * 1000)
+            state["railways_latency_ms"] = latency
+            state["last_api_call"] = datetime.utcnow().strftime('%H:%M:%S UTC')
+
+            if not live_trains:
+                if is_demo:
+                    await log_agent("ingest_node", "[RAILMIND] Using fallback mock data for testing")
+                    live_trains = client.mock_train_data()
+
+        print(f"[RAILMIND] API returned {len(live_trains)} trains")
+        if live_trains:
+            print(f"[RAILMIND] Sample: {live_trains[0]}")
             
-        cancelled = await get_cancelled_trains()
-        live_trains = results.copy()
-        for train in cancelled:
-            live_trains.append({
-                "train_number": train.get("TrainNo", "Unknown"),
-                "train_name": train.get("TrainName", "Unknown"),
-                "status": "cancelled",
-                "delay_minutes": 999,
-                "passenger_load": "overcrowded",
-                "current_station": "Unknown",
-                "lat": 20.5937,
-                "lng": 78.9629
-            })
-        
-        for train in live_trains:
-            await websocket_manager.broadcast(json.dumps({
-                "type": "TRAIN_UPDATE",
-                "data": train
-            }))
-        
         state["raw_train_data"] = live_trains
         await log_agent("ingest_node", f"[RAILMIND] Ingested {len(live_trains)} trains")
     except Exception as e:
+        LANGGRAPH_ERROR_COUNT.labels(node_name="ingest_node").inc()
         logger.error(f"Error in ingest_node: {e}")
         await log_agent("ingest_node", f"[RAILMIND] [ERROR] Ingest node failed: {e}")
+    finally:
+        LANGGRAPH_NODE_LATENCY.labels(node_name="ingest_node").observe(time.time() - start_time_metric)
     return state
 
 async def detect_node(state: AgentState) -> AgentState:
+    start_time_metric = time.time()
     try:
         await log_agent("detect_node", "[RAILMIND] Running real-time anomaly detection rules...")
         anomalies: List[TrainAnomaly] = []
@@ -124,83 +115,64 @@ async def detect_node(state: AgentState) -> AgentState:
             if train_num in processed_trains:
                 continue
             train_name = train.get("train_name", "Unknown")
-            location = train.get("current_station") or train.get("source") or "Unknown"
             delay = train.get("delay_minutes", 0)
-            load = train.get("passenger_load")
-            status = str(train.get("status") or "").lower()
-            
-            # Rule 1: delay > 15 minutes
-            if delay > 15:
-                severity = "low"
-                if 15 < delay <= 30:
-                    severity = "low"
-                elif 30 < delay <= 60:
-                    severity = "medium"
-                elif 60 < delay <= 120:
+            status = train.get("status", "unknown")
+            current_station = train.get("current_station", "Unknown")
+
+            if status.lower() == "delayed" and delay > 30:
+                severity = "medium"
+                if delay > 60:
                     severity = "high"
-                elif delay > 120:
+                if delay > 120:
                     severity = "critical"
                     
                 anomalies.append({
                     "train_number": train_num,
                     "train_name": train_name,
-                    "anomaly_type": "delay",
+                    "delay_minutes": delay,
+                    "location": current_station,
+                    "current_station": current_station,
+                    "issue_type": "Schedule Delay",
                     "severity": severity,
-                    "location": location,
-                    "delay_minutes": delay,
-                    "passenger_load": load,
-                    "current_station": train.get("current_station") or location,
-                    "status": status or "delayed",
-                    "source": train.get("source") or "Unknown",
-                    "destination": train.get("destination") or "Unknown"
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "source": train.get("source", "Unknown"),
+                    "destination": train.get("destination", "Unknown")
                 })
-                
-            # Rule 2: overcrowding checks
-            elif load == "overcrowded":
+
+            # Additional dummy checks for route deviation
+            if train.get("passenger_load", "").lower() == "overcrowded" and delay > 15:
+                # Upgrading severity
                 anomalies.append({
                     "train_number": train_num,
                     "train_name": train_name,
-                    "anomaly_type": "overcrowding",
+                    "delay_minutes": delay,
+                    "location": current_station,
+                    "current_station": current_station,
+                    "issue_type": "Congestion Delay",
                     "severity": "high",
-                    "location": location,
-                    "delay_minutes": delay,
-                    "passenger_load": load,
-                    "current_station": train.get("current_station") or location,
-                    "status": status or "delayed",
-                    "source": train.get("source") or "Unknown",
-                    "destination": train.get("destination") or "Unknown"
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "source": train.get("source", "Unknown"),
+                    "destination": train.get("destination", "Unknown")
                 })
-                
-            # Rule 3: cancellations
-            elif status == "cancelled":
-                anomalies.append({
-                    "train_number": train_num,
-                    "train_name": train_name,
-                    "anomaly_type": "cancellation",
-                    "severity": "critical",
-                    "location": location,
-                    "delay_minutes": delay,
-                    "passenger_load": load,
-                    "current_station": train.get("current_station") or location,
-                    "status": "cancelled",
-                    "source": train.get("source") or "Unknown",
-                    "destination": train.get("destination") or "Unknown"
-                })
-                
+
         state["anomalies"] = anomalies
-        n = len(anomalies)
-        if n > 0:
-            await log_agent("detect_node", f"[RAILMIND] [WARNING] Detected {n} anomalies")
+
+        if anomalies:
+            await log_agent("detect_node", f"[RAILMIND] [WARNING] Detected {len(anomalies)} anomalies")
             state["should_continue"] = True
         else:
             await log_agent("detect_node", "[RAILMIND] [OK] All trains nominal")
             state["should_continue"] = False
     except Exception as e:
+        LANGGRAPH_ERROR_COUNT.labels(node_name="detect_node").inc()
         logger.error(f"Error in detect_node: {e}")
         await log_agent("detect_node", f"[RAILMIND] [ERROR] Detect node failed: {e}")
+    finally:
+        LANGGRAPH_NODE_LATENCY.labels(node_name="detect_node").observe(time.time() - start_time_metric)
     return state
 
 async def reason_node(state: AgentState) -> AgentState:
+    start_time_metric = time.time()
     try:
         anomalies = state.get("anomalies", [])
         if not anomalies:
@@ -212,7 +184,6 @@ async def reason_node(state: AgentState) -> AgentState:
 
         await log_agent("reason_node", f"[RAILMIND] Contacting AI to reason about {len(anomalies)} anomalies...")
         
-        import time
         start_time = time.time()
         
         result = await reason_with_ai(anomalies)
@@ -229,19 +200,27 @@ async def reason_node(state: AgentState) -> AgentState:
             state["claude_reasoning"] = "{}"
             await log_agent("reason_node", "[RAILMIND] AI reasoning failed — using defaults")
     except Exception as e:
+        LANGGRAPH_ERROR_COUNT.labels(node_name="reason_node").inc()
         logger.error(f"Error in reason_node: {e}")
         await log_agent("reason_node", f"[RAILMIND] [ERROR] Reason node failed: {e}")
+    finally:
+        LANGGRAPH_NODE_LATENCY.labels(node_name="reason_node").observe(time.time() - start_time_metric)
     return state
 
 async def reroute_node(state: AgentState) -> AgentState:
+    start_time_metric = time.time()
     try:
         await log_agent("reroute_node", "[RAILMIND] Checking and resolving rerouting options...")
     except Exception as e:
+        LANGGRAPH_ERROR_COUNT.labels(node_name="reroute_node").inc()
         logger.error(f"Error in reroute_node: {e}")
         await log_agent("reroute_node", f"[RAILMIND] [ERROR] Reroute node failed: {e}")
+    finally:
+        LANGGRAPH_NODE_LATENCY.labels(node_name="reroute_node").observe(time.time() - start_time_metric)
     return state
 
 async def coordination_node(state: AgentState) -> AgentState:
+    start_time_metric = time.time()
     try:
         await log_agent("coordination_node", "[RAILMIND] Initiating department task dispatches...")
         claude_json = state.get("claude_reasoning", "{}")
@@ -312,17 +291,21 @@ async def coordination_node(state: AgentState) -> AgentState:
 
         await log_agent("coordination_node", "[RAILMIND] Dispatched tasks to 3 departments simultaneously")
     except Exception as e:
+        LANGGRAPH_ERROR_COUNT.labels(node_name="coordination_node").inc()
         logger.error(f"Error in coordination_node: {e}")
         await log_agent("coordination_node", f"[RAILMIND] [ERROR] Coordination node failed: {e}")
+    finally:
+        LANGGRAPH_NODE_LATENCY.labels(node_name="coordination_node").observe(time.time() - start_time_metric)
     return state
 
 async def alert_node(state: AgentState) -> AgentState:
+    start_time_metric = time.time()
     try:
         await log_agent("alert_node", "[RAILMIND] Sending Twilio notifications...")
-        m_phone = os.getenv("MAINTENANCE_PHONE", "+1234567891")
-        o_phone = os.getenv("OPERATIONS_PHONE", "+1234567892")
-        s_phone = os.getenv("STATION_PHONE", "+1234567893")
-        p_phone = os.getenv("DEMO_PASSENGER_PHONE", "+1234567894")
+        m_phone = settings.maintenance_phone
+        o_phone = settings.operations_phone
+        s_phone = settings.station_phone
+        p_phone = settings.demo_passenger_phone
 
         phone_map = {
             "maintenance": m_phone,
@@ -367,8 +350,11 @@ async def alert_node(state: AgentState) -> AgentState:
         state["sms_alerts_sent"] = sent_sms
         await log_agent("alert_node", f"[RAILMIND] SMS alerts sent to {len(sent_sms)} recipients")
     except Exception as e:
+        LANGGRAPH_ERROR_COUNT.labels(node_name="alert_node").inc()
         logger.error(f"Error in alert_node: {e}")
         await log_agent("alert_node", f"[RAILMIND] [ERROR] Alert node failed: {e}")
+    finally:
+        LANGGRAPH_NODE_LATENCY.labels(node_name="alert_node").observe(time.time() - start_time_metric)
     return state
 
 async def save_incident_if_not_duplicate(db, incident):
@@ -397,6 +383,7 @@ async def save_incident_if_not_duplicate(db, incident):
     return True
 
 async def report_node(state: AgentState) -> AgentState:
+    start_time_metric = time.time()
     try:
         await log_agent("report_node", "[RAILMIND] Broadcasting operations report...")
         
@@ -470,6 +457,9 @@ async def report_node(state: AgentState) -> AgentState:
         await log_agent("report_node", "[RAILMIND] Sleeping for 10 seconds before next iteration...")
         await asyncio.sleep(10)
     except Exception as e:
+        LANGGRAPH_ERROR_COUNT.labels(node_name="report_node").inc()
         logger.error(f"Error in report_node: {e}")
         await log_agent("report_node", f"[RAILMIND] [ERROR] Report node failed: {e}")
+    finally:
+        LANGGRAPH_NODE_LATENCY.labels(node_name="report_node").observe(time.time() - start_time_metric)
     return state

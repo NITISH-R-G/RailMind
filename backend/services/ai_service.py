@@ -1,14 +1,35 @@
 from google import genai # type: ignore
 import os
 import json
+import httpx
 from dotenv import load_dotenv # type: ignore
+
+from backend.config import settings
+from backend.utils.circuit_breaker import create_circuit_breaker, FallbackException
+from backend.utils.metrics import AI_TOKEN_CONSUMPTION
+from backend.utils.logger import get_json_logger
+
+logger = get_json_logger(__name__)
 
 # Ensure env variables are loaded before configuration
 env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
 load_dotenv(dotenv_path=env_path)
 
 # Configure Gemini API key
-client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+client = genai.Client(api_key=settings.gemini_api_key)
+
+llm_circuit_breaker = create_circuit_breaker("llm_api")
+
+@llm_circuit_breaker
+async def call_gemini(prompt: str):
+    response = await client.aio.models.generate_content(
+        model="gemini-2.0-flash",
+        contents=prompt
+    )
+    if response and hasattr(response, 'usage_metadata') and response.usage_metadata:
+        AI_TOKEN_CONSUMPTION.labels(model="gemini-2.0-flash").inc(response.usage_metadata.total_token_count)
+    return response
+
 async def reason_with_ai(anomalies: list) -> dict:
     if not anomalies:
         return {}
@@ -95,16 +116,16 @@ Generate a JSON response:
         "incident_summary": f"Automated incident report logged for train {train_number} at {current_station} with {delay_minutes} minutes delay."
     }
 
-    prompt = f"{system_prompt}\n\n{user_prompt}"
+    prompt = f"{system_prompt}
+
+{user_prompt}"
 
     try:
-        response = await client.aio.models.generate_content(
-            model="gemini-2.0-flash",
-            contents=prompt
-        )
+        response = await call_gemini(prompt)
         text = response.text.strip()
         text = text.replace("```json", "").replace("```", "").strip()
         result = json.loads(text)
+
         # Verify required keys exist
         required_keys = ["incident_title", "situation_summary", "reroute_plan", "maintenance_task", 
                          "operations_task", "station_manager_task", "passenger_sms", "incident_summary"]
@@ -113,8 +134,35 @@ Generate a JSON response:
                 result[key] = fallback_response[key]
         return result
     except json.JSONDecodeError:
-        print("[RAILMIND] Gemini JSON parse failed, using fallback")
+        logger.error("[RAILMIND] Gemini JSON parse failed, using fallback")
         return fallback_response
     except Exception as e:
-        print(f"[RAILMIND] Gemini error: {e} — using fallback")
-        return fallback_response
+        logger.warning(f"[RAILMIND] Gemini error/circuit open: {e} — attempting Ollama fallback")
+
+        # Autonomous Circuit Breaker Fallback
+        try:
+            async with httpx.AsyncClient() as http_client:
+                ollama_req = {
+                    "model": "mistral",
+                    "prompt": prompt,
+                    "stream": False,
+                    "format": "json"
+                }
+                logger.info(f"Calling fallback LLM at {settings.ollama_fallback_url}")
+                ollama_resp = await http_client.post(settings.ollama_fallback_url, json=ollama_req, timeout=30.0)
+                ollama_resp.raise_for_status()
+                resp_json = ollama_resp.json()
+                AI_TOKEN_CONSUMPTION.labels(model="ollama_fallback").inc(resp_json.get("eval_count", 0))
+
+                text = resp_json.get("response", "").strip()
+                result = json.loads(text)
+
+                required_keys = ["incident_title", "situation_summary", "reroute_plan", "maintenance_task",
+                                 "operations_task", "station_manager_task", "passenger_sms", "incident_summary"]
+                for key in required_keys:
+                    if key not in result:
+                        result[key] = fallback_response[key]
+                return result
+        except Exception as fallback_e:
+            logger.error(f"[RAILMIND] Ollama fallback failed: {fallback_e} — using static fallback")
+            return fallback_response
