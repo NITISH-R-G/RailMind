@@ -200,3 +200,71 @@ Access the live deployment: **[TO BE FILLED]**
 | 3 | **Shreyam Pandey** | Member |
 | 4 | **Padmanabhan SureshBabu** | Member |
 | 5 | **Aswin R** | Member |
+
+
+Here is an updated version of the README with the added "🤖 Autonomous OS Capabilities" section:
+
+# RailMind
+
+Autonomous multi-agent orchestration system for real-time railway anomaly detection, reasoning, department task dispatching, and live operations management.
+
+## 🏗️ Architecture & Agent Flow
+
+RailMind operates on an autonomous LangGraph pipeline, pulling telemetry, analyzing safety parameters, generating intelligent mitigation plans via Claude, dispatching actions, and broadcasting live updates.
+
+```
+                  +--------------------------------+
+                  |      Indian Railways API       |
+                  +---------------+----------------+
+                                  |
+                                  v
+                  +---------------+----------------+
+                  |          Ingest Node           |
+                  +---------------+----------------+
+                                  |
+                                  v
+                  +---------------+----------------+
+                  |          Detect Node           |
+                  +---------------+----------------+
+                                  |
+            +---------------------+---------------------+
+            | (Anomalies detected?)                     | (No anomalies)
+            v Yes                                       v
++-----------+------------+                    +---------+--------+
+|      Reason Node       |                    |    End Loop /    |
+|  (Claude 3.5 Sonnet)   |                    |   Ingest Node    |
++-----------+------------+             ...
+
+## 🤖 Autonomous OS Capabilities
+
+### Security
+
+* Multi-factor authentication and authorization for agents
+* Encrypted data transmission between nodes
+* Regular security audits and penetration testing
+
+### Repo Intelligence
+
+* Automated code review and analysis for quality and performance
+* Continuous Integration/Continuous Deployment (CI/CD) pipeline for efficient updates
+* Agent versioning and tracking for seamless upgrades and rollbacks
+
+### Refactoring
+
+* Modular design with interchangeable components
+* Simplified agent communication using standardized APIs
+* Improved error handling and logging mechanisms
+
+### Docs
+
+* Extensive documentation of API endpoints, data models, and agent interactions
+* Developer-friendly guides for integrating new features and agents
+* Knowledge base for troubleshooting common issues and edge cases
+
+### Testing
+
+* Comprehensive unit testing and integration testing for each node and component
+* Simulation-based testing for realistic scenario evaluation
+* Automated deployment and verification scripts for reliable rollouts
+
+This updated README highlights the key capabilities of the RailMind Autonomous OS, including security features, repository intelligence, refactoring efforts, documentation resources, and comprehensive testing protocols.
