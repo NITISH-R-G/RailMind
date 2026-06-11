@@ -17,7 +17,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__))))
 
 # Verify imports from our backend package
 try:
-    from backend.agents.nodes import ingest_node, detect_node, reason_node # type: ignore
+    from backend.agents.nodes import ingest_node, detect_node, reason_node, supervisor_node # type: ignore
     from backend.services.railways_api import RailwaysAPIClient # type: ignore
     from backend.services.twilio_service import TwilioSMSClient # type: ignore
     from backend.services.db_client import db_client # type: ignore
@@ -269,12 +269,11 @@ async def run_tests():
                 "loop_count": 0
             }
             
-            # Execute step-by-step
-            state = await ingest_node(state)
-            state = await detect_node(state)
+            # Execute step-by-step using new differential returns
+            state.update(await detect_node(state))
             
             print("  [SYSTEM] Running AI decision graph...")
-            state = await reason_node(state)
+            state.update(await reason_node(state))
             
             claude_output = state.get("claude_reasoning")
             print(f"  [AI Decision JSON]:\n{claude_output}")
