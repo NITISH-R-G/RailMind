@@ -4,7 +4,6 @@ import json
 import asyncio
 import httpx # type: ignore
 import threading
-import time
 from datetime import datetime
 from dotenv import load_dotenv # type: ignore
 
@@ -20,7 +19,6 @@ try:
     from backend.agents.nodes import ingest_node, detect_node, reason_node # type: ignore
     from backend.services.railways_api import RailwaysAPIClient # type: ignore
     from backend.services.twilio_service import TwilioSMSClient # type: ignore
-    from backend.services.db_client import db_client # type: ignore
 except ImportError as e:
     print(f"[FAIL] Failed to import project backend modules. Make sure you run from the railmind folder: {e}")
     sys.exit(1)
@@ -378,7 +376,7 @@ async def run_tests():
                 checklist["Frontend"] = True
             else:
                 print(f"  [FAIL] Frontend server responded with non-ok code: {resp.status_code}\n")
-    except Exception as e:
+    except Exception:
         print("  [FAIL] Run: cd frontend && npm run dev\n")
 
     # ----------------------------------------------------
