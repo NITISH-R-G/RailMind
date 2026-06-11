@@ -50,9 +50,9 @@ const createCustomMarker = (status, delay) => {
   });
 };
 
-export default function LiveMap({ trains = [] }) {
+export default function LiveMap({ trains }) {
   // Setup fallback default trains if data is empty
-  const activeTrains = trains.length > 0 ? trains : [
+  const activeTrains = trains ?? [
     {
       train_number: "12002",
       train_name: "Chennai Exp",
