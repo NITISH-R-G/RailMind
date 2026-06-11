@@ -23,7 +23,7 @@ async def send_sms(to: str, message: str) -> bool:
         return True
     try:
         if client:
-            msg = client.messages.create(
+            msg = await client.messages.create_async(
                 body=message[:160],
                 from_=from_number,
                 to=to
@@ -76,7 +76,7 @@ class TwilioSMSClient:
             return "SMdemo1234567890abcdef"
         try:
             if self.client:
-                msg = self.client.messages.create(
+                msg = await self.client.messages.create_async(
                     body=message_body[:160],
                     from_=self.from_number,
                     to=to_number

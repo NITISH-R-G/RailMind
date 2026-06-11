@@ -20,8 +20,8 @@ async def test_send_sms_exception():
 
         # Mock the client object within the twilio_service module
         with patch("backend.services.twilio_service.client") as mock_client:
-            # Set up the mock to raise an Exception when messages.create is called
-            mock_client.messages.create.side_effect = Exception("Simulated Twilio Error")
+            # Set up the mock to raise an Exception when messages.create_async is called
+            mock_client.messages.create_async.side_effect = Exception("Simulated Twilio Error")
 
             # Call send_sms
             result = await send_sms("1234567890", "Test Message")
