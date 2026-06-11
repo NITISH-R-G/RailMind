@@ -14,8 +14,8 @@ vi.mock('react-leaflet', () => {
 });
 
 describe('LiveMap Component', () => {
-  it('renders gracefully with empty train array (fallback logic)', () => {
-    render(<LiveMap trains={[]} />);
+  it('renders fallback markers when trains prop is undefined', () => {
+    render(<LiveMap />);
 
     // Fallback data is expected to show 3 markers
     const mapContainer = screen.getByTestId('map-container');
@@ -27,6 +27,16 @@ describe('LiveMap Component', () => {
     expect(screen.getByText('Chennai Exp')).toBeInTheDocument();
     expect(screen.getByText('Mumbai Rajdhani')).toBeInTheDocument();
     expect(screen.getByText('Howrah Duronto')).toBeInTheDocument();
+  });
+
+  it('renders no markers when trains array is explicitly empty', () => {
+    render(<LiveMap trains={[]} />);
+
+    const mapContainer = screen.getByTestId('map-container');
+    expect(mapContainer).toBeInTheDocument();
+
+    const markers = screen.queryAllByTestId('marker');
+    expect(markers).toHaveLength(0);
   });
 
   it('renders with provided trains', () => {
@@ -52,5 +62,11 @@ describe('LiveMap Component', () => {
     expect(markers).toHaveLength(1);
 
     expect(screen.getByText('Test Express')).toBeInTheDocument();
+  });
+
+  it('handles null trains prop gracefully', () => {
+    render(<LiveMap trains={null} />);
+    const mapContainer = screen.getByTestId('map-container');
+    expect(mapContainer).toBeInTheDocument();
   });
 });
