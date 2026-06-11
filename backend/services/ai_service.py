@@ -23,7 +23,7 @@ async def reason_with_ai(anomalies: list) -> dict:
     status = anomaly.get("status", "delayed")
     source = anomaly.get("source", "Unknown")
     destination = anomaly.get("destination", "Unknown")
-    severity = anomaly.get("severity", "medium")
+    anomaly.get("severity", "medium")
 
     system_prompt = """You are RailMind, India's autonomous railway operations intelligence agent. You monitor Indian Railways in real time. When anomalies are detected, you generate SPECIFIC, ACTIONABLE decisions based on the exact train, route, and station involved. Never give generic responses. Every decision must reference the specific train number, station name, and delay duration."""
 

@@ -3,7 +3,7 @@ import json
 import logging
 import os
 from fastapi import WebSocket, WebSocketDisconnect
-from typing import List, Dict
+from typing import List
 import redis.asyncio as aioredis # type: ignore
 from redis.asyncio.client import PubSub # type: ignore
 

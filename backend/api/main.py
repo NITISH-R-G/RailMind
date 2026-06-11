@@ -1,7 +1,5 @@
-import asyncio
 import os
 import uvicorn
-from datetime import datetime
 from dotenv import load_dotenv
 
 # Ensure env variables are loaded before imports
@@ -14,8 +12,6 @@ from ..services.db_client import db_client
 
 from .routes import router
 from .websocket import websocket_endpoint, websocket_manager # type: ignore
-from ..agents.graph import railmind_graph # type: ignore
-from ..agents.state import AgentState # type: ignore
 from ..services.railways_api import RailwaysAPIClient
 
 app = FastAPI(
