@@ -90,3 +90,59 @@ def test_fallback_of_current_station_name():
     }
     result = parse_rapidapi_train_for_agent(data, "12345")
     assert result["current_station"] == "Unknown"
+
+def test_partial_data_schema():
+    # Provide a payload that has a "data" key but is otherwise empty
+    # This forces the parser to use default values for everything
+    data = {"data": {"dummy_key": "dummy_value"}}
+    result = parse_rapidapi_train_for_agent(data, "12345")
+
+    assert result == {
+        "train_number": "12345",
+        "train_name": "12345",
+        "current_station": "Unknown",
+        "station_code": "Unknown",
+        "delay_minutes": 0,
+        "passenger_load": "normal",
+        "status": "on_time",
+        "schedule_arrival": "-",
+        "actual_arrival": "-",
+        "source": "Unknown",
+        "destination": "Unknown",
+        "lat": 20.5937,
+        "lng": 78.9629
+    }
+
+def test_current_station_name_stripping():
+    # Test stripping ~ and whitespace from current_station_name
+    data = {
+        "data": {
+            "current_station_code": "UNKNOWN_CODE",
+            "current_station_name": " ~New Delhi~ "
+        }
+    }
+    result = parse_rapidapi_train_for_agent(data, "12345")
+    assert result["current_station"] == "New Delhi"
+
+def test_train_name_fallback():
+    # If train_name is missing, it should fall back to train_number
+    # (Since outer_data.get("train_number", train_number) falls back to the parameter,
+    # and then outer_data.get("train_name", t_num) falls back to the resolved t_num)
+    data = {
+        "data": {
+            "train_number": "54321"
+        }
+    }
+    result = parse_rapidapi_train_for_agent(data, "12345")
+    assert result["train_number"] == "54321"
+    assert result["train_name"] == "54321"
+
+def test_title_non_string():
+    # Test that title handles non-string values gracefully (like None)
+    data = {
+        "data": {
+            "title": None
+        }
+    }
+    result = parse_rapidapi_train_for_agent(data, "12345")
+    assert result["status"] == "on_time" # Default status since none is None and doesn't match "reached"
