@@ -1,6 +1,6 @@
 /* eslint-disable */
 import React from 'react';
-import { MapContainer, TileLayer, Marker, Popup, ZoomControl } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, ZoomControl, Polyline } from 'react-leaflet';
 import L from 'leaflet';
 
 // Lookup dictionary for Indian Railway Station coordinates
@@ -27,30 +27,34 @@ const MAP_CENTER = [21.7679, 78.8718];
 
 // Create custom icons representing train status on the map
 const createCustomMarker = (status, delay) => {
-  let color = '#00f0ff'; // nominal (cyan)
+  let color = '#00ff66'; // active nominal (green)
   if (status === 'cancelled' || delay > 60) {
-    color = '#ff3366'; // critical (red)
+    color = '#ff3333'; // critical (red)
   } else if (status === 'delayed' || delay > 15) {
-    color = '#ffb300'; // warning (yellow)
+    color = '#ffb000'; // warning (amber)
   }
 
+  // Use a cleaner SVG marker with tactical styling
+  const svgIcon = `
+    <svg width="20" height="20" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">
+      <rect x="2" y="2" width="16" height="16" fill="transparent" stroke="${color}" stroke-width="1.5" />
+      <rect x="6" y="6" width="8" height="8" fill="${color}" />
+      <line x1="10" y1="0" x2="10" y2="4" stroke="${color}" stroke-width="1" />
+      <line x1="10" y1="16" x2="10" y2="20" stroke="${color}" stroke-width="1" />
+      <line x1="0" y1="10" x2="4" y2="10" stroke="${color}" stroke-width="1" />
+      <line x1="16" y1="10" x2="20" y2="10" stroke="${color}" stroke-width="1" />
+    </svg>
+  `;
+
   return L.divIcon({
-    html: `<div style="
-      position: relative;
-      width: 12px;
-      height: 12px;
-      background-color: ${color};
-      border: 1px solid #080a0d;
-      box-shadow: 0 0 6px ${color};
-      cursor: pointer;
-    "></div>`,
+    html: `<div class="${(status === 'cancelled' || delay > 60) ? 'animate-pulse' : ''}">${svgIcon}</div>`,
     className: 'custom-train-marker-wrapper',
-    iconSize: [12, 12],
-    iconAnchor: [6, 6]
+    iconSize: [20, 20],
+    iconAnchor: [10, 10]
   });
 };
 
-export default function LiveMap({ trains = [] }) {
+export default function LiveMap({ trains = [], incidents = [] }) {
   // Setup fallback default trains if data is empty
   const activeTrains = trains.length > 0 ? trains : [
     {
@@ -62,7 +66,9 @@ export default function LiveMap({ trains = [] }) {
       distance_next: "0.4 KM",
       current_station: "MAS",
       delay_minutes: 0,
-      status: "On Time"
+      status: "On Time",
+      source: "NDLS",
+      destination: "MSB"
     },
     {
       train_number: "12952",
@@ -73,7 +79,9 @@ export default function LiveMap({ trains = [] }) {
       distance_next: "12 KM",
       current_station: "NDLS",
       delay_minutes: 0,
-      status: "On Time"
+      status: "On Time",
+      source: "MMCT",
+      destination: "NDLS"
     },
     {
       train_number: "12260",
@@ -84,7 +92,9 @@ export default function LiveMap({ trains = [] }) {
       distance_next: "3.2 KM",
       current_station: "AGC",
       delay_minutes: 75,
-      status: "Delayed"
+      status: "Delayed",
+      source: "NDLS",
+      destination: "HWH"
     }
   ];
 
@@ -93,7 +103,7 @@ export default function LiveMap({ trains = [] }) {
       flex: 1,
       height: '100%',
       position: 'relative',
-      backgroundColor: '#080a0d'
+      backgroundColor: '#0a0e17' // Obsidian background
     }}>
       <MapContainer 
         center={MAP_CENTER} 
@@ -101,7 +111,7 @@ export default function LiveMap({ trains = [] }) {
         zoomControl={false}
         style={{ width: '100%', height: '100%' }}
       >
-        {/* Dark style tile layer */}
+        {/* Dark style tile layer (CartoDB Dark Matter) */}
         <TileLayer
           url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
           attribution='&copy; <a href="https://carto.com/">CARTO</a>'
@@ -110,7 +120,7 @@ export default function LiveMap({ trains = [] }) {
         {/* Render zoom controls in bottom-right corner */}
         <ZoomControl position="bottomright" />
 
-        {/* Place train markers */}
+        {/* Place train markers and tactical path lines */}
         {activeTrains.map((train, idx) => {
           // Determine coordinate
           let position;
@@ -129,66 +139,92 @@ export default function LiveMap({ trains = [] }) {
           const isDelayed = train.delay_minutes > 15;
           const markerIcon = createCustomMarker(train.status?.toLowerCase(), train.delay_minutes);
 
+          // Path Logic
+          const hasReroute = incidents.some(inc => inc.train_number === train.train_number && inc.reroute_plan);
+          let lineColor = '#00ff66';
+          if (hasReroute) lineColor = '#ffb000';
+          if (train.delay_minutes > 60) lineColor = '#ff3333';
+
+          const sourceCoord = STATION_COORDS[train.source] || null;
+          const destCoord = STATION_COORDS[train.destination] || null;
+
+          let pathCoords = [];
+          if (sourceCoord) pathCoords.push(sourceCoord);
+          pathCoords.push(position);
+          if (destCoord) pathCoords.push(destCoord);
+
           return (
-            <Marker 
-              key={train.train_number || idx} 
-              position={position}
-              icon={markerIcon}
-            >
-              <Popup closeButton={false} minWidth={240}>
-                <div style={{
-                  padding: '12px',
-                  backgroundColor: '#121820',
-                  color: '#e2e8f0',
-                  fontFamily: "'JetBrains Mono', monospace",
-                  borderRadius: '0px',
-                  border: '1px solid #1a2433'
-                }}>
-                  {/* Tooltip Header */}
+            <React.Fragment key={train.train_number || idx}>
+              {pathCoords.length > 1 && (
+                <Polyline
+                  positions={pathCoords}
+                  pathOptions={{
+                    color: lineColor,
+                    weight: 2,
+                    opacity: 0.6,
+                    dashArray: hasReroute ? '5, 5' : null
+                  }}
+                />
+              )}
+              <Marker
+                position={position}
+                icon={markerIcon}
+              >
+                <Popup closeButton={false} minWidth={240}>
                   <div style={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    marginBottom: '8px'
+                    padding: '12px',
+                    backgroundColor: '#161f30',
+                    color: '#e2e8f0',
+                    fontFamily: "'JetBrains Mono', monospace",
+                    borderRadius: '0px',
+                    border: '1px solid #26354a'
                   }}>
-                    <span style={{
-                      fontSize: '9px',
-                      fontWeight: 700,
-                      backgroundColor: isDelayed ? 'rgba(255, 179, 0, 0.15)' : 'rgba(0, 240, 255, 0.15)',
-                      color: isDelayed ? '#ffb300' : '#00f0ff',
-                      padding: '2px 6px',
-                      borderRadius: '0px',
-                      border: `1px solid ${isDelayed ? '#ffb300' : '#00f0ff'}`,
-                      letterSpacing: '0.5px'
+                    {/* Tooltip Header */}
+                    <div style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      marginBottom: '8px'
                     }}>
-                      {statusText}
-                    </span>
-                    <span style={{ fontSize: '10px', color: '#5c7080' }}>NO.{train.train_number}</span>
+                      <span style={{
+                        fontSize: '9px',
+                        fontWeight: 700,
+                        backgroundColor: isDelayed ? 'rgba(255, 176, 0, 0.15)' : 'rgba(0, 255, 102, 0.15)',
+                        color: isDelayed ? '#ffb000' : '#00ff66',
+                        padding: '2px 6px',
+                        borderRadius: '0px',
+                        border: `1px solid ${isDelayed ? '#ffb000' : '#00ff66'}`,
+                        letterSpacing: '0.5px'
+                      }}>
+                        {statusText}
+                      </span>
+                      <span style={{ fontSize: '10px', color: '#5c7080' }}>NO.{train.train_number}</span>
+                    </div>
+
+                    {/* Tooltip Body */}
+                    <h3 style={{ fontSize: '13px', fontWeight: 600, color: '#fff', marginBottom: '4px' }}>
+                      {train.train_name || 'Train Express'}
+                    </h3>
+                    <p style={{ fontSize: '10px', color: '#8a9ba8', marginBottom: '8px' }}>
+                      ID: {train.train_id || `TN-${train.train_number}`} • VEL: {train.speed || '80 km/h'}
+                    </p>
+
+                    <div style={{ height: '1px', backgroundColor: '#26354a', margin: '8px 0' }}></div>
+
+                    {/* Tooltip Footer */}
+                    <div style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      fontSize: '10px',
+                      fontWeight: 500
+                    }}>
+                      <span style={{ color: '#5c7080' }}>NEXT: <strong style={{ color: '#e2e8f0' }}>{train.next_station || 'MAS'}</strong></span>
+                      <span style={{ color: '#00ff66' }}>{train.distance_next || '0.5 KM'}</span>
+                    </div>
                   </div>
-
-                  {/* Tooltip Body */}
-                  <h3 style={{ fontSize: '13px', fontWeight: 600, color: '#fff', marginBottom: '4px' }}>
-                    {train.train_name || 'Train Express'}
-                  </h3>
-                  <p style={{ fontSize: '10px', color: '#8a9ba8', marginBottom: '8px' }}>
-                    ID: {train.train_id || `TN-${train.train_number}`} • VEL: {train.speed || '80 km/h'}
-                  </p>
-
-                  <div style={{ height: '1px', backgroundColor: '#1a2433', margin: '8px 0' }}></div>
-
-                  {/* Tooltip Footer */}
-                  <div style={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    fontSize: '10px',
-                    fontWeight: 500
-                  }}>
-                    <span style={{ color: '#5c7080' }}>NEXT: <strong style={{ color: '#e2e8f0' }}>{train.next_station || 'MAS'}</strong></span>
-                    <span style={{ color: '#00f0ff' }}>{train.distance_next || '0.5 KM'}</span>
-                  </div>
-                </div>
-              </Popup>
-            </Marker>
+                </Popup>
+              </Marker>
+            </React.Fragment>
           );
         })}
       </MapContainer>

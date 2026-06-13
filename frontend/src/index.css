@@ -2,21 +2,21 @@
 @import "leaflet/dist/leaflet.css";
 
 :root {
-  --bg-main: #080a0d;
-  --bg-panel: #0d1117;
-  --bg-card: #121820;
-  --bg-card-hover: #17202b;
-  --border-color: #1a2433;
-  --border-color-active: #3b82f6;
+  --bg-main: #0A0E17;
+  --bg-panel: #0A0E17;
+  --bg-card: #161F30;
+  --bg-card-hover: #1e2a40;
+  --border-color: #26354A;
+  --border-color-active: #00FF66;
   --text-primary: #e2e8f0;
   --text-secondary: #8a9ba8;
   --text-muted: #5c7080;
-  --accent-color: #00f0ff;
+  --accent-color: #00FF66;
   
-  --color-critical: #ff3366;
-  --color-warning: #ffb300;
+  --color-critical: #FF3333;
+  --color-warning: #FFB000;
   --color-info: #00f0ff;
-  --color-resolved: #00e676;
+  --color-resolved: #00FF66;
 }
 
 * {
@@ -26,13 +26,13 @@
 }
 
 body {
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: 'JetBrains Mono', monospace;
   background-color: var(--bg-main);
   background-image: 
-    radial-gradient(rgba(0, 240, 255, 0.03) 1px, transparent 0),
-    radial-gradient(rgba(0, 240, 255, 0.02) 2px, transparent 0);
-  background-size: 24px 24px, 48px 48px;
-  background-position: 0 0, 12px 12px;
+    linear-gradient(var(--border-color) 1px, transparent 1px),
+    linear-gradient(90deg, var(--border-color) 1px, transparent 1px);
+  background-size: 20px 20px;
+  background-position: center center;
   color: var(--text-primary);
   overflow: hidden;
   -webkit-font-smoothing: antialiased;
@@ -63,15 +63,15 @@ body {
 @keyframes pulse-live {
   0% {
     transform: scale(0.95);
-    box-shadow: 0 0 0 0 rgba(0, 240, 255, 0.5);
+    box-shadow: 0 0 0 0 rgba(0, 255, 102, 0.5);
   }
   70% {
     transform: scale(1);
-    box-shadow: 0 0 0 8px rgba(0, 240, 255, 0);
+    box-shadow: 0 0 0 8px rgba(0, 255, 102, 0);
   }
   100% {
     transform: scale(0.95);
-    box-shadow: 0 0 0 0 rgba(0, 240, 255, 0);
+    box-shadow: 0 0 0 0 rgba(0, 255, 102, 0);
   }
 }
 
@@ -80,7 +80,7 @@ body {
   width: 8px;
   height: 8px;
   background-color: var(--accent-color);
-  border-radius: 50%;
+  border-radius: 0; /* Square dot */
   animation: pulse-live 2s infinite;
 }
 
@@ -88,7 +88,7 @@ body {
 .leaflet-container {
   width: 100%;
   height: 100%;
-  background-color: #080a0d !important;
+  background-color: var(--bg-main) !important;
 }
 
 .leaflet-control-zoom {
@@ -98,7 +98,7 @@ body {
 
 .leaflet-control-zoom-in,
 .leaflet-control-zoom-out {
-  background-color: var(--bg-panel) !important;
+  background-color: var(--bg-card) !important;
   color: var(--text-primary) !important;
   border-bottom: 1px solid var(--border-color) !important;
   font-family: 'JetBrains Mono', monospace !important;
@@ -107,7 +107,7 @@ body {
 
 .leaflet-control-zoom-in:hover,
 .leaflet-control-zoom-out:hover {
-  background-color: var(--bg-card) !important;
+  background-color: var(--bg-card-hover) !important;
   color: var(--accent-color) !important;
 }
 
@@ -144,7 +144,7 @@ body {
 
 /* Tactical Panel/Widget Border Styles */
 .terminal-panel {
-  background-color: var(--bg-panel);
+  background-color: var(--bg-main);
   border: 1px solid var(--border-color);
   position: relative;
 }

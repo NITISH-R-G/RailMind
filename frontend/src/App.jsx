@@ -7,6 +7,8 @@ import IncidentFeed from './components/IncidentFeed';
 import TaskBoard from './components/TaskBoard';
 import RouteIntelligence from './components/RouteIntelligence';
 import { ShieldAlert, AlertTriangle, Info, Check, CornerDownRight, Terminal, RefreshCw, X, Shield, User, HelpCircle, Activity, Bell, Settings } from 'lucide-react';
+import * as ReactWindow from 'react-window';
+import useStore from './store';
 
 class ErrorBoundary extends React.Component {
   constructor(props) {
@@ -62,15 +64,18 @@ class ErrorBoundary extends React.Component {
 }
 
 function MainApp() {
-  const [activeTab, setActiveTab] = useState('Dashboard');
-  const [loopCount, setLoopCount] = useState(0);
-  const [incidentCount, setIncidentCount] = useState(0);
-  const [incidents, setIncidents] = useState([]);
-  const [tasks, setTasks] = useState([]);
-  const [trains, setTrains] = useState([]);
-  const [wsStatus, setWsStatus] = useState('reconnecting');
-  const [logs, setLogs] = useState([]);
-  
+  const {
+    activeTab, setActiveTab,
+    loopCount, setLoopCount,
+    incidentCount, setIncidentCount,
+    incidents, setIncidents, addIncident, updateIncident, removeIncident,
+    tasks, setTasks, updateTask,
+    trains, setTrains,
+    wsStatus, setWsStatus,
+    logs, addLog, clearLogs,
+    telemetry, setTelemetry
+  } = useStore();
+
   // Modal Overlay States
   const [showSettings, setShowSettings] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
@@ -129,7 +134,6 @@ function MainApp() {
           train_number: inc.train_number || 'Unknown'
         }));
         setIncidents(formatted);
-        setIncidentCount(formatted.length);
       }
     } catch (err) {
       console.error("[API] Failed to fetch incidents:", err);
@@ -164,6 +168,18 @@ function MainApp() {
     fetchIncidents();
     fetchTrains();
     fetchTasks();
+
+    const fetchTelemetry = async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/telemetry`);
+        if (res.ok) {
+          const data = await res.json();
+          setTelemetry(data);
+        }
+      } catch (err) {}
+    };
+    fetchTelemetry();
+    const telemetryInterval = setInterval(fetchTelemetry, 5000);
 
     const wsUrl = `ws://${window.location.hostname}:8000/ws`;
     let socket;
@@ -205,11 +221,7 @@ function MainApp() {
               train_number: report.train_number || 'Unknown'
             };
 
-            setIncidents(prev => {
-              if (prev.some(inc => inc.id === newIncident.id)) return prev;
-              return [newIncident, ...prev];
-            });
-            setIncidentCount(prev => prev + 1);
+            addIncident(newIncident);
             if (report.loop_count !== undefined) {
               setLoopCount(report.loop_count);
             }
@@ -217,7 +229,7 @@ function MainApp() {
             fetchTasks();
             fetchTrains();
           } else if (payload.type === 'AGENT_LOG') {
-            setLogs(prev => [...prev, payload].slice(-200)); // Keep last 200 logs
+            addLog(payload);
           }
         } catch (err) {
           console.error("[WEBSOCKET] Error parsing socket data:", err);
@@ -241,6 +253,7 @@ function MainApp() {
     return () => {
       if (socket) socket.close();
       clearTimeout(reconnectTimeout);
+      clearInterval(telemetryInterval);
     };
   }, []);
 
@@ -258,12 +271,7 @@ function MainApp() {
         headers: headers
       });
       if (res.ok) {
-        setIncidents(prev => prev.map(inc => {
-          if (inc.id === incidentId) {
-            return { ...inc, approved: true };
-          }
-          return inc;
-        }));
+        updateIncident(incidentId, { approved: true });
       } else if (res.status === 401) {
         alert("Incorrect admin password.");
         console.error("Unauthorized: Incorrect admin password.");
@@ -277,8 +285,7 @@ function MainApp() {
 
   const handleAcknowledge = (incidentId) => {
     console.log(`Acknowledging warning incident: ${incidentId}`);
-    setIncidents(prev => prev.filter(inc => inc.id !== incidentId));
-    setIncidentCount(prev => Math.max(0, prev - 1));
+    removeIncident(incidentId);
   };
 
   const handleResolve = async (taskId) => {
@@ -288,12 +295,7 @@ function MainApp() {
         method: 'POST'
       });
       if (res.ok) {
-        setTasks(prev => prev.map(t => {
-          if (t._id === taskId || t.id === taskId) {
-            return { ...t, status: 'resolved', urgency: 'resolved' };
-          }
-          return t;
-        }));
+        updateTask(taskId, { status: 'resolved', urgency: 'resolved' });
       } else {
         console.error("Failed to mark task resolved on API server");
       }
@@ -940,28 +942,176 @@ function MainApp() {
     );
   };
 
+
+  // Bento Grid View Components
+
+  // Panel A: Live Ingestion Stream
+  const LiveStreamPanel = () => {
+    const listRef = useRef();
+
+    useEffect(() => {
+      if (listRef.current && logs.length > 0) {
+        listRef.current.scrollToItem(logs.length - 1, "end");
+      }
+    }, [logs.length]);
+
+    const Row = ({ index, style }) => {
+      const log = logs[index];
+      if (!log) return null;
+      return (
+        <div style={{ ...style, display: 'flex', alignItems: 'center', fontSize: '11px', borderBottom: '1px solid #1a2433' }}>
+          <span style={{ color: '#ffb300', marginRight: '8px' }}>{log.message.substring(0, 21)}</span>
+          <span style={{ color: '#00f0ff', marginRight: '8px' }}>{log.message.substring(21, 35)}</span>
+          <span style={{ color: '#e2e8f0', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{log.message.substring(35)}</span>
+        </div>
+      );
+    };
+
+    return (
+      <div className="terminal-panel" style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
+        <div style={{ padding: '8px 12px', borderBottom: '1px solid #26354a', backgroundColor: '#161f30', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <h3 className="palantir-mono" style={{ fontSize: '11px', color: '#f8fafc', margin: 0, textTransform: 'uppercase', letterSpacing: '1px' }}>
+            [ PANEL A ] INGESTION STREAM
+          </h3>
+          <span className="pulse-dot-cyan" style={{ backgroundColor: '#00ff66' }}></span>
+        </div>
+        <div style={{ flex: 1, backgroundColor: '#0a0e17', padding: '8px' }}>
+          {logs.length === 0 ? (
+            <div className="palantir-mono" style={{ color: '#5c7080', fontSize: '11px', fontStyle: 'italic', padding: '8px' }}>
+              [SYSTEM] Awaiting live logs...
+            </div>
+          ) : (
+            <ReactWindow.FixedSizeList
+              ref={listRef}
+              height={200} // This will be constrained by flex
+              width="100%"
+              itemSize={24}
+              itemCount={logs.length}
+              className="palantir-mono"
+            >
+              {Row}
+            </ReactWindow.FixedSizeList>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  // Panel B: Critical Incident Core
+  const IncidentCorePanel = () => {
+    return (
+      <div className="terminal-panel" style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
+        <div style={{ padding: '8px 12px', borderBottom: '1px solid #26354a', backgroundColor: '#161f30', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <h3 className="palantir-mono" style={{ fontSize: '11px', color: '#f8fafc', margin: 0, textTransform: 'uppercase', letterSpacing: '1px' }}>
+            [ PANEL B ] INCIDENT MATRIX
+          </h3>
+          <span className="palantir-mono" style={{ fontSize: '10px', color: '#ff3333' }}>{incidents.length} ACTIVE</span>
+        </div>
+        <div style={{ flex: 1, backgroundColor: '#0a0e17', padding: '8px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          {incidents.slice(0, 5).map(inc => (
+            <div key={inc.id} style={{
+              border: '1px solid #26354a',
+              borderLeft: `4px solid ${inc.severity === 'critical' ? '#ff3333' : inc.severity === 'warning' ? '#ffb000' : '#00ff66'}`,
+              backgroundColor: '#161f30',
+              padding: '8px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '4px'
+            }}>
+               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span className="palantir-mono" style={{ fontSize: '10px', fontWeight: 700, color: inc.severity === 'critical' ? '#ff3333' : '#ffb000' }}>
+                    {inc.severity.toUpperCase()}
+                  </span>
+                  <span className="palantir-mono" style={{ fontSize: '10px', color: '#5c7080' }}>{inc.timestamp}</span>
+               </div>
+               <span className="palantir-mono" style={{ fontSize: '12px', color: '#e2e8f0' }}>{inc.title}</span>
+               <span className="palantir-mono" style={{ fontSize: '10px', color: '#8a9ba8', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{inc.description}</span>
+            </div>
+          ))}
+          {incidents.length === 0 && (
+             <div className="palantir-mono" style={{ color: '#5c7080', fontSize: '11px', textAlign: 'center', padding: '16px' }}>[ NO ANOMALIES ]</div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  // Panel C: Task Synchronization
+  const TaskSyncPanel = () => {
+    return (
+      <div className="terminal-panel" style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
+        <div style={{ padding: '8px 12px', borderBottom: '1px solid #26354a', backgroundColor: '#161f30' }}>
+          <h3 className="palantir-mono" style={{ fontSize: '11px', color: '#f8fafc', margin: 0, textTransform: 'uppercase', letterSpacing: '1px' }}>
+            [ PANEL C ] TASK SYNCHRONIZATION
+          </h3>
+        </div>
+        <div style={{ flex: 1, backgroundColor: '#0a0e17', overflowY: 'auto' }}>
+           <TaskBoard tasks={tasks} onResolve={handleResolve} fullScreen={true} />
+        </div>
+      </div>
+    );
+  };
+
+  // Panel D: Telemetry Overview
+  const TelemetryPanel = () => {
+    return (
+      <div className="terminal-panel" style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
+        <div style={{ padding: '8px 12px', borderBottom: '1px solid #26354a', backgroundColor: '#161f30' }}>
+          <h3 className="palantir-mono" style={{ fontSize: '11px', color: '#f8fafc', margin: 0, textTransform: 'uppercase', letterSpacing: '1px' }}>
+            [ PANEL D ] TELEMETRY OVERVIEW
+          </h3>
+        </div>
+        <div style={{ flex: 1, backgroundColor: '#0a0e17', padding: '12px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', overflowY: 'auto' }}>
+           <div style={{ border: '1px solid #26354a', padding: '8px', backgroundColor: '#161f30' }}>
+             <span className="palantir-mono" style={{ fontSize: '9px', color: '#8a9ba8', display: 'block' }}>AGENT LOOP</span>
+             <span className="palantir-mono" style={{ fontSize: '14px', color: '#00ff66', fontWeight: 700 }}>{telemetry?.agent_loop_status?.toUpperCase() || 'RUNNING'}</span>
+           </div>
+           <div style={{ border: '1px solid #26354a', padding: '8px', backgroundColor: '#161f30' }}>
+             <span className="palantir-mono" style={{ fontSize: '9px', color: '#8a9ba8', display: 'block' }}>WS CLIENTS</span>
+             <span className="palantir-mono" style={{ fontSize: '14px', color: '#00f0ff', fontWeight: 700 }}>{telemetry?.websocket_clients || 0}</span>
+           </div>
+           <div style={{ border: '1px solid #26354a', padding: '8px', backgroundColor: '#161f30' }}>
+             <span className="palantir-mono" style={{ fontSize: '9px', color: '#8a9ba8', display: 'block' }}>API LATENCY</span>
+             <span className="palantir-mono" style={{ fontSize: '14px', color: '#ffb000', fontWeight: 700 }}>{telemetry?.railways_latency_ms || 0}ms</span>
+           </div>
+           <div style={{ border: '1px solid #26354a', padding: '8px', backgroundColor: '#161f30' }}>
+             <span className="palantir-mono" style={{ fontSize: '9px', color: '#8a9ba8', display: 'block' }}>COGNITIVE DELAY</span>
+             <span className="palantir-mono" style={{ fontSize: '14px', color: '#ffb000', fontWeight: 700 }}>{telemetry?.ai_latency_ms || 0}ms</span>
+           </div>
+        </div>
+      </div>
+    );
+  };
+
   const renderContent = () => {
     switch (activeTab) {
       case 'Dashboard':
         return (
-          <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
-            <div style={{
-              display: 'flex',
-              flexDirection: 'column',
-              flex: 1,
-              borderRight: '1px solid #1a2433',
-              backgroundColor: '#080a0d'
-            }}>
-              <div style={{ flex: 1, position: 'relative' }}>
-                <LiveMap trains={trains} />
-              </div>
-              <TaskBoard tasks={tasks} onResolve={handleResolve} />
+          <div style={{ display: 'grid', gridTemplateColumns: '3fr 1fr', gridTemplateRows: '2fr 1fr', gap: '8px', padding: '8px', flex: 1, backgroundColor: '#0a0e17', overflow: 'hidden' }}>
+            {/* Main Map View */}
+            <div className="terminal-panel" style={{ gridColumn: '1 / 2', gridRow: '1 / 2', position: 'relative' }}>
+              <LiveMap trains={trains} incidents={incidents} />
             </div>
-            <IncidentFeed 
-              incidents={incidents} 
-              onApprove={handleApprove}
-              onAcknowledge={handleAcknowledge}
-            />
+
+            {/* Sidebar Top: Incident Core */}
+            <div style={{ gridColumn: '2 / 3', gridRow: '1 / 2' }}>
+              <IncidentCorePanel />
+            </div>
+
+            {/* Bottom Left: Tasks & Logs */}
+            <div style={{ gridColumn: '1 / 2', gridRow: '2 / 3', display: 'flex', gap: '8px' }}>
+               <div style={{ flex: 1 }}>
+                 <TaskSyncPanel />
+               </div>
+               <div style={{ flex: 1 }}>
+                 <LiveStreamPanel />
+               </div>
+            </div>
+
+            {/* Bottom Right: Telemetry Overview */}
+            <div style={{ gridColumn: '2 / 3', gridRow: '2 / 3' }}>
+              <TelemetryPanel />
+            </div>
           </div>
         );
 
