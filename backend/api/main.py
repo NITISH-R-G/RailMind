@@ -10,6 +10,9 @@ load_dotenv(dotenv_path=env_path)
 
 import secrets
 from fastapi import FastAPI, WebSocket, HTTPException, Depends, status
+from prometheus_client import make_asgi_app
+from ..config import settings
+from ..monitoring import setup_logging
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from ..services.db_client import db_client
@@ -46,6 +49,9 @@ app = FastAPI(
     description="Autonomous railway operations intelligence agent API",
     version="0.1.0"
 )
+
+metrics_app = make_asgi_app()
+app.mount("/metrics", metrics_app)
 
 # CORS middleware configuration
 app.add_middleware(

@@ -1,0 +1,49 @@
+{
+  "title": "RailMind Observability",
+  "panels": [
+    {
+      "type": "timeseries",
+      "title": "Agent Token Consumption",
+      "targets": [
+        {
+          "expr": "rate(agent_token_consumption_total[5m])",
+          "legendFormat": "{{node}} ({{model}})"
+        }
+      ],
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 }
+    },
+    {
+      "type": "heatmap",
+      "title": "Node Execution Latency",
+      "targets": [
+        {
+          "expr": "sum(rate(node_execution_latency_seconds_bucket[5m])) by (le, node)",
+          "format": "heatmap"
+        }
+      ],
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Error Rates",
+      "targets": [
+        {
+          "expr": "rate(error_rates_total[5m])",
+          "legendFormat": "{{node}} - {{type}}"
+        }
+      ],
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Twilio API Status",
+      "targets": [
+        {
+          "expr": "rate(twilio_api_status_total[5m])",
+          "legendFormat": "{{status}}"
+        }
+      ],
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 }
+    }
+  ]
+}
