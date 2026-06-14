@@ -5,7 +5,7 @@ import traceback
 from dotenv import load_dotenv
 from typing import Dict, Any, List
 from uuid import uuid4
-from datetime import datetime
+from datetime import datetime, timezone
 from ..services.ai_service import reason_with_ai
 from .state import AgentState, TrainAnomaly, DepartmentTask
 from ..services.db_client import db_client
@@ -14,6 +14,13 @@ from ..services.twilio_service import TwilioSMSClient
 from ..api.websocket import websocket_manager
 
 logger = logging.getLogger(__name__)
+
+DEFAULT_PASSENGER_IMPACT = "847 passengers affected"
+DEFAULT_MAINT_TASK = "Inspect signaling hardware."
+DEFAULT_OPS_TASK = "Execute scheduling adjustments."
+DEFAULT_STATION_TASK = "Broadcast delay announcements."
+DEFAULT_SMS_TASK = "Check platform screens for status updates."
+
 
 # Ensure env variables are loaded before configuration
 env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
@@ -44,17 +51,17 @@ async def log_agent(node_name: str, message: str):
         await websocket_manager.broadcast(json.dumps({
             "type": "AGENT_STATE_CHANGE",
             "state": node_name,
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.now(timezone.utc).isoformat()
         }))
         await websocket_manager.broadcast(json.dumps({
             "type": "AGENT_LOG",
-            "timestamp": datetime.utcnow().strftime('%H:%M:%S'),
+            "timestamp": datetime.now(timezone.utc).strftime('%H:%M:%S'),
             "node": node_name,
             "level": level,
             "message": message
         }))
     except Exception as e:
-        logger.error(f"Failed to broadcast AGENT_LOG / AGENT_STATE_CHANGE message: {e}")
+        logger.exception("Failed to broadcast update: %s", e)
 
 async def evaluate_previous_action(state: AgentState) -> dict:
     try:
@@ -102,7 +109,7 @@ async def evaluate_previous_action(state: AgentState) -> dict:
                     "lng": 78.9629
                 })
             diff["raw_train_data"] = live_trains
-            diff["last_api_call"] = datetime.utcnow().isoformat()
+            diff["last_api_call"] = datetime.now(timezone.utc).isoformat()
             diff["railways_latency_ms"] = int((time.time() - start_time) * 1000)
 
         # Evaluate pending incidents
@@ -150,7 +157,7 @@ async def evaluate_previous_action(state: AgentState) -> dict:
 
         return diff
     except Exception as e:
-        logger.error(f"Error in evaluate_previous_action: {e}")
+        logger.exception("Error occurred: %s", e)
         await log_agent("evaluate_previous_action", f"[RAILMIND] [ERROR] Self-healing evaluation failed: {e}")
         return {"last_node_executed": "evaluate_previous_action", "errors": [f"evaluate_previous_action error: {e}"]}
 
@@ -199,7 +206,7 @@ async def ingest_node(state: AgentState) -> dict:
             results = train_results
             
             latency = int((time.time() - start_time) * 1000)
-            diff["last_api_call"] = datetime.utcnow().isoformat()
+            diff["last_api_call"] = datetime.now(timezone.utc).isoformat()
             diff["railways_latency_ms"] = latency
             
             print(f"[RAILMIND] API returned {len(results)} trains")
@@ -236,7 +243,7 @@ async def ingest_node(state: AgentState) -> dict:
         await log_agent("ingest_node", f"[RAILMIND] Ingested {len(live_trains)} trains")
         return diff
     except Exception as e:
-        logger.error(f"Error in ingest_node: {e}")
+        logger.exception("Error occurred: %s", e)
         await log_agent("ingest_node", f"[RAILMIND] [ERROR] Ingest node failed: {e}")
         return {"last_node_executed": "ingest_node", "errors": [f"ingest_node error: {e}"]}
 
@@ -372,7 +379,7 @@ async def detect_node(state: AgentState) -> dict:
             diff["should_continue"] = False
         return diff
     except Exception as e:
-        logger.error(f"Error in detect_node: {e}")
+        logger.exception("Error occurred: %s", e)
         await log_agent("detect_node", f"[RAILMIND] [ERROR] Detect node failed: {e}")
         return {"last_node_executed": "detect_node", "errors": [f"detect_node error: {e}"]}
 
@@ -456,7 +463,7 @@ async def predict_node(state: AgentState) -> dict:
 
         predict_prompt = f"""
         Current delayed trains: {json.dumps(anomalies)}
-        Time: {datetime.utcnow().strftime("%H:%M")}
+        Time: {datetime.now(timezone.utc).strftime("%H:%M")}
 
         PREDICT the next 30 minutes:
         1. Which currently on-time trains will be affected
@@ -486,16 +493,16 @@ async def predict_node(state: AgentState) -> dict:
                 "data": prediction
             }))
         except Exception as e:
-            logger.error(f"Failed to broadcast prediction update: {e}")
+            logger.exception("Failed to broadcast update: %s", e)
         return diff
     except Exception as e:
-        logger.error(f"Error in predict_node: {e}")
+        logger.exception("Error occurred: %s", e)
         await log_agent("predict_node", f"[RAILMIND] [ERROR] Predictive intelligence failed: {e}")
         return {"last_node_executed": "predict_node", "errors": [f"predict_node error: {e}"]}
-            
+
         predict_prompt = f"""
         Current delayed trains: {json.dumps(anomalies)}
-        Time: {datetime.utcnow().strftime("%H:%M")}
+        Time: {datetime.now(timezone.utc).strftime("%H:%M")}
         
         PREDICT the next 30 minutes:
         1. Which currently on-time trains will be affected 
@@ -525,9 +532,9 @@ async def predict_node(state: AgentState) -> dict:
                 "data": prediction
             }))
         except Exception as e:
-            logger.error(f"Failed to broadcast prediction update: {e}")
+            logger.exception("Failed to broadcast update: %s", e)
     except Exception as e:
-        logger.error(f"Error in predict_node: {e}")
+        logger.exception("Error occurred: %s", e)
         await log_agent("predict_node", f"[RAILMIND] [ERROR] Predictive intelligence failed: {e}")
     return state
 
@@ -544,17 +551,17 @@ async def broadcast_log(stage: str, message: str):
         await websocket_manager.broadcast(json.dumps({
             "type": "AGENT_STATE_CHANGE",
             "state": stage,
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.now(timezone.utc).isoformat()
         }))
         await websocket_manager.broadcast(json.dumps({
             "type": "AGENT_LOG",
-            "timestamp": datetime.utcnow().strftime('%H:%M:%S'),
+            "timestamp": datetime.now(timezone.utc).strftime('%H:%M:%S'),
             "node": "reason_node",
             "level": level,
             "message": message
         }))
     except Exception as e:
-        logger.error(f"Failed to broadcast in broadcast_log: {e}")
+        logger.exception("Failed to broadcast update: %s", e)
 
 def generate_mock_json_fallback(prompt: str, state: AgentState) -> dict:
     is_prediction = "PREDICT the next 30 minutes" in prompt
@@ -610,7 +617,7 @@ def generate_mock_json_fallback(prompt: str, state: AgentState) -> dict:
                     "reason": "spacing safety"
                 }
             ],
-            "passenger_impact": "847 passengers affected",
+            "passenger_impact": DEFAULT_PASSENGER_IMPACT,
             "estimated_recovery_time": "30 minutes",
             "confidence": 0.94
         }
@@ -731,7 +738,7 @@ async def execute_tool(tool_name: str, params: dict, reason: str, state: AgentSt
             "urgency": urgency,
             "action_required": "Emergency dispatch action",
             "status": "pending",
-            "timestamp": datetime.utcnow()
+            "timestamp": datetime.now(timezone.utc)
         }
         try:
             await db_client.insert_department_tasks([mongo_task])
@@ -822,7 +829,7 @@ async def reason_node(state: AgentState) -> dict:
         await log_agent("reason_node", f"[RAILMIND] Real Autonomous Brain cycle complete ({latency}ms)")
         return diff
     except Exception as e:
-        logger.error(f"Error in reason_node: {e}")
+        logger.exception("Error occurred: %s", e)
         await log_agent("reason_node", f"[RAILMIND] [ERROR] Reason node failed: {e}")
         return {"last_node_executed": "reason_node", "errors": [f"reason_node error: {e}"]}
 
@@ -866,7 +873,7 @@ async def reroute_node(state: AgentState) -> dict:
                 diff["reroute_plan"] = f"No detour bypass available: {status_msg}"
         return diff
     except Exception as e:
-        logger.error(f"Error in reroute_node: {e}")
+        logger.exception("Error occurred: %s", e)
         await log_agent("reroute_node", f"[RAILMIND] [ERROR] Reroute node failed: {e}")
         return {"last_node_executed": "reroute_node", "errors": [f"reroute error: {e}"], "detour_route": []}
 
@@ -963,7 +970,7 @@ async def coordination_node(state: AgentState) -> dict:
                 "urgency": task["urgency"],
                 "action_required": task["action_required"],
                 "status": "pending",
-                "timestamp": datetime.utcnow()
+                "timestamp": datetime.now(timezone.utc)
             })
 
         try:
@@ -974,7 +981,7 @@ async def coordination_node(state: AgentState) -> dict:
         await log_agent("coordination_node", "[RAILMIND] Dispatched tasks to 3 departments simultaneously")
         return diff
     except Exception as e:
-        logger.error(f"Error in coordination_node: {e}")
+        logger.exception("Error occurred: %s", e)
         await log_agent("coordination_node", f"[RAILMIND] [ERROR] Coordination node failed: {e}")
         return {"last_node_executed": "coordination_node", "errors": [f"coordination error: {e}"]}
 
@@ -1031,7 +1038,7 @@ async def alert_node(state: AgentState) -> dict:
         diff["sms_alerts_sent"] = sent_sms
         return diff
     except Exception as e:
-        logger.error(f"Error in alert_node: {e}")
+        logger.exception("Error occurred: %s", e)
         await log_agent("alert_node", f"[RAILMIND] [ERROR] Alert node failed: {e}")
         return {"last_node_executed": "alert_node", "errors": [f"alert error: {e}"]}
 
@@ -1074,10 +1081,10 @@ async def report_node(state: AgentState) -> dict:
         situation_summary = ""
 
         # Default fallback values for tasks
-        maintenance_task = "Inspect signaling hardware."
-        operations_task = "Execute scheduling adjustments."
-        station_manager_task = "Broadcast delay announcements."
-        passenger_sms = "Check platform screens for status updates."
+        maintenance_task = DEFAULT_MAINT_TASK
+        operations_task = DEFAULT_OPS_TASK
+        station_manager_task = DEFAULT_STATION_TASK
+        passenger_sms = DEFAULT_SMS_TASK
 
         if "perception" in claude_response and "decision" in claude_response:
             perception = claude_response["perception"]
@@ -1114,10 +1121,10 @@ async def report_node(state: AgentState) -> dict:
             ]
         else:
             situation_summary = claude_response.get("situation_summary") or f"Train {train_number} {train_name} is running {delay_minutes} minutes behind schedule at {current_station}."
-            maintenance_task = claude_response.get("maintenance_task") or "Inspect signaling hardware."
-            operations_task = claude_response.get("operations_task") or "Execute scheduling adjustments."
-            station_manager_task = claude_response.get("station_manager_task") or "Broadcast delay announcements."
-            passenger_sms = claude_response.get("passenger_sms") or "Check platform screens for status updates."
+            maintenance_task = claude_response.get("maintenance_task") or DEFAULT_MAINT_TASK
+            operations_task = claude_response.get("operations_task") or DEFAULT_OPS_TASK
+            station_manager_task = claude_response.get("station_manager_task") or DEFAULT_STATION_TASK
+            passenger_sms = claude_response.get("passenger_sms") or DEFAULT_SMS_TASK
             confidence_score = claude_response.get("confidence_score")
             reasoning_steps = claude_response.get("reasoning_steps") or []
 
@@ -1136,7 +1143,7 @@ async def report_node(state: AgentState) -> dict:
             at_risk_count = len(pred.get("at_risk_trains", [])) or 3
             future_time = "14:30"
             try:
-                ts_str = state.get("last_api_call") or datetime.utcnow().isoformat()
+                ts_str = state.get("last_api_call") or datetime.now(timezone.utc).isoformat()
                 from datetime import timedelta
                 dt = datetime.fromisoformat(str(ts_str))
                 future_dt = dt + timedelta(minutes=30)
@@ -1148,7 +1155,7 @@ async def report_node(state: AgentState) -> dict:
         incident_report = {
             "incident_id": incident_id,
             "loop_created": state.get("loop_count", 0),
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "train_number": train_number,
             "train_name": train_name,
             "incident_title": cascade_title or f"{train_number} {train_name} delayed {delay_minutes}min at {current_station}",
@@ -1181,7 +1188,7 @@ async def report_node(state: AgentState) -> dict:
                     "data": incident_report
                 }))
             except Exception as e:
-                logger.error(f"Failed to broadcast incident update: {e}")
+                logger.exception("Failed to broadcast update: %s", e)
 
             await log_agent("LOGGED", f"Incident #RM-{incident_id[:3].upper()} saved to database")
         else:
@@ -1194,7 +1201,7 @@ async def report_node(state: AgentState) -> dict:
         diff["loop_count"] = state.get("loop_count", 0) + 1
         diff["next_node"] = "END"
 
-        passengers = state.get("decision", {}).get("passenger_impact", "847 passengers affected")
+        passengers = state.get("decision", {}).get("passenger_impact", DEFAULT_PASSENGER_IMPACT)
         if isinstance(passengers, str):
             passengers_str = passengers
         else:
@@ -1211,7 +1218,7 @@ async def report_node(state: AgentState) -> dict:
         return diff
 
     except Exception as e:
-        logger.error(f"Error in report_node: {e}")
+        logger.exception("Error occurred: %s", e)
         await log_agent("report_node", f"[RAILMIND] [ERROR] Report node failed: {e}")
         return {"last_node_executed": "report_node", "errors": [f"report error: {e}"]}
             
@@ -1234,10 +1241,10 @@ async def report_node(state: AgentState) -> dict:
         situation_summary = ""
         
         # Default fallback values for tasks
-        maintenance_task = "Inspect signaling hardware."
-        operations_task = "Execute scheduling adjustments."
-        station_manager_task = "Broadcast delay announcements."
-        passenger_sms = "Check platform screens for status updates."
+        maintenance_task = DEFAULT_MAINT_TASK
+        operations_task = DEFAULT_OPS_TASK
+        station_manager_task = DEFAULT_STATION_TASK
+        passenger_sms = DEFAULT_SMS_TASK
 
         if "perception" in claude_response and "decision" in claude_response:
             perception = claude_response["perception"]
@@ -1274,10 +1281,10 @@ async def report_node(state: AgentState) -> dict:
             ]
         else:
             situation_summary = claude_response.get("situation_summary") or f"Train {train_number} {train_name} is running {delay_minutes} minutes behind schedule at {current_station}."
-            maintenance_task = claude_response.get("maintenance_task") or "Inspect signaling hardware."
-            operations_task = claude_response.get("operations_task") or "Execute scheduling adjustments."
-            station_manager_task = claude_response.get("station_manager_task") or "Broadcast delay announcements."
-            passenger_sms = claude_response.get("passenger_sms") or "Check platform screens for status updates."
+            maintenance_task = claude_response.get("maintenance_task") or DEFAULT_MAINT_TASK
+            operations_task = claude_response.get("operations_task") or DEFAULT_OPS_TASK
+            station_manager_task = claude_response.get("station_manager_task") or DEFAULT_STATION_TASK
+            passenger_sms = claude_response.get("passenger_sms") or DEFAULT_SMS_TASK
             confidence_score = claude_response.get("confidence_score")
             reasoning_steps = claude_response.get("reasoning_steps") or []
 
@@ -1296,7 +1303,7 @@ async def report_node(state: AgentState) -> dict:
             at_risk_count = len(pred.get("at_risk_trains", [])) or 3
             future_time = "14:30"
             try:
-                ts_str = state.get("last_api_call") or datetime.utcnow().isoformat()
+                ts_str = state.get("last_api_call") or datetime.now(timezone.utc).isoformat()
                 from datetime import timedelta
                 dt = datetime.fromisoformat(str(ts_str))
                 future_dt = dt + timedelta(minutes=30)
@@ -1308,7 +1315,7 @@ async def report_node(state: AgentState) -> dict:
         incident_report = {
             "incident_id": incident_id,
             "loop_created": state.get("loop_count", 0),
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "train_number": train_number,
             "train_name": train_name,
             "incident_title": cascade_title or f"{train_number} {train_name} delayed {delay_minutes}min at {current_station}",
@@ -1341,7 +1348,7 @@ async def report_node(state: AgentState) -> dict:
                     "data": incident_report
                 }))
             except Exception as e:
-                logger.error(f"Failed to broadcast incident update: {e}")
+                logger.exception("Failed to broadcast update: %s", e)
 
             await log_agent("LOGGED", f"Incident #RM-{incident_id[:3].upper()} saved to database")
         else:
@@ -1355,7 +1362,7 @@ async def report_node(state: AgentState) -> dict:
         state["loop_count"] = state.get("loop_count", 0) + 1
         state["next_node"] = "END"
 
-        passengers = state.get("decision", {}).get("passenger_impact", "847 passengers affected")
+        passengers = state.get("decision", {}).get("passenger_impact", DEFAULT_PASSENGER_IMPACT)
         if isinstance(passengers, str):
             passengers_str = passengers
         else:
@@ -1372,7 +1379,7 @@ async def report_node(state: AgentState) -> dict:
         }
 
     except Exception as e:
-        logger.error(f"Error in report_node: {e}")
+        logger.exception("Error occurred: %s", e)
         await log_agent("report_node", f"[RAILMIND] [ERROR] Report node failed: {e}")
     return {}
 
@@ -1413,7 +1420,7 @@ async def supervisor_node(state: AgentState) -> dict:
             logger.warning("JSON parse failed: %s", e)
         except Exception:
             logger.exception("Unexpected error in supervisor self-correction logic")
-            pass # continue to normal routing if parsing fails
+            # continue to normal routing if parsing fails
 
         if not state.get("reroute_plan"):
              return {"next_node": "reroute_node", "last_node_executed": "supervisor_node"}
