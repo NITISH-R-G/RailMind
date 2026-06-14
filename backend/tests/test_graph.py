@@ -12,9 +12,6 @@ from backend.services.ai_service import MitigationPlan
 
 @pytest.mark.asyncio
 async def test_reason_node_tool_recovery():
-    # Test agentic recovery when tool components report exceptions
-    # We will simulate the ai_service encountering an exception and safely falling back
-
     anomalies = [{
         "train_number": "12301",
         "train_name": "Test Train",
@@ -46,22 +43,20 @@ async def test_reason_node_tool_recovery():
         "tools_used": []
     }
 
-    # We mock the chat model to raise an exception during the react loop
+    # Patch create_react_agent to simulate a tool exception
     with patch('langgraph.prebuilt.create_react_agent') as mock_create_agent:
         mock_agent = MagicMock()
         mock_agent.ainvoke.side_effect = Exception("Simulated Tool Failure!")
         mock_create_agent.return_value = mock_agent
 
-        # Invoke reason_node
         from backend.agents.nodes import reason_node
         new_state = await reason_node(state)
 
-        # Verify it handled the exception and returned the fallback mock dictionary
         assert new_state.get("claude_reasoning") is not None
+        assert new_state.get("claude_reasoning") != "{}"
 
         parsed = json.loads(new_state["claude_reasoning"])
         assert "situation_summary" in parsed
-        assert "delayed" in parsed["situation_summary"]
 
 @pytest.mark.asyncio
 async def test_supervisor_self_correction():

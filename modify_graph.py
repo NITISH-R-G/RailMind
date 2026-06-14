@@ -1,13 +1,11 @@
-from langgraph.graph import StateGraph, END  # type: ignore
-import os
-from .state import AgentState  # type: ignore
-from .nodes import (  # type: ignore
-    ingest_node, detect_node, reason_node,
-    reroute_node, coordination_node, alert_node, report_node,
-    supervisor_node, evaluate_previous_action, predict_node
-)
+import re
 
+with open("backend/agents/graph.py", "r") as f:
+    content = f.read()
 
+# Replace the whole graph construction part
+
+new_graph_str = """
 workflow = StateGraph(AgentState)
 workflow.add_node("evaluate_previous_action", evaluate_previous_action)
 workflow.add_node("ingest_node", ingest_node)
@@ -59,6 +57,9 @@ workflow.add_conditional_edges(
 )
 
 from langgraph.checkpoint.memory import MemorySaver
+"""
 
-checkpointer = MemorySaver()
-railmind_graph = workflow.compile(checkpointer=checkpointer)
+content = re.sub(r'workflow = StateGraph\(AgentState\).*?from langgraph\.checkpoint\.memory import MemorySaver', new_graph_str, content, flags=re.DOTALL)
+
+with open("backend/agents/graph.py", "w") as f:
+    f.write(content)
