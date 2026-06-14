@@ -505,14 +505,14 @@ async def predict_node(state: AgentState) -> dict:
         predict_prompt = f"""
         Current delayed trains: {json.dumps(anomalies)}
         Time: {datetime.now(timezone.utc).strftime("%H:%M")}
-        
+
         PREDICT the next 30 minutes:
-        1. Which currently on-time trains will be affected 
+        1. Which currently on-time trains will be affected
            by these delays? (cascade effect)
         2. Which stations will face platform congestion?
         3. What is the worst case scenario?
         4. What preemptive actions can prevent the cascade?
-        
+
         Respond in JSON: {{
             "at_risk_trains": ["train_no", ...],
             "congestion_stations": ["station_code", ...],
@@ -523,17 +523,17 @@ async def predict_node(state: AgentState) -> dict:
         """
         prediction = await call_gemini(predict_prompt, state)
         state["prediction"] = prediction
-        
+
         at_risk = len(prediction.get("at_risk_trains", []))
         await log_agent("PREDICTING", f"{at_risk} trains at risk next 30 mins...")
-        
+
         # Show prediction on dashboard
         try:
             await websocket_manager.broadcast(json.dumps({
                 "type": "PREDICTION_UPDATE",
                 "data": prediction
             }))
-        except Exception as e:
+        except OSError as e: # Changed generic Exception to specific to avoid shadowing
             logger.exception(ERR_BROADCAST_MSG, e)
     except Exception as e:
         logger.exception(ERR_OCCURRED_MSG, e)
