@@ -1,0 +1,85 @@
+version: '3.8'
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - MONGODB_URI=mongodb://root:example@mongodb:27017/railmind?authSource=admin
+      - REDIS_URL=redis://redis:6379/0
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-mock_key}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-mock_key}
+      - TWILIO_ACCOUNT_SID=${TWILIO_ACCOUNT_SID:-mock_sid}
+      - TWILIO_AUTH_TOKEN=${TWILIO_AUTH_TOKEN:-mock_token}
+      - DEMO_MODE=true
+    depends_on:
+      - mongodb
+      - redis
+    volumes:
+      - api-logs:/var/log/railmind
+
+  worker:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    command: ["arq", "backend.worker.WorkerSettings"]
+    environment:
+      - MONGODB_URI=mongodb://root:example@mongodb:27017/railmind?authSource=admin
+      - REDIS_URL=redis://redis:6379/0
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-mock_key}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-mock_key}
+      - TWILIO_ACCOUNT_SID=${TWILIO_ACCOUNT_SID:-mock_sid}
+      - TWILIO_AUTH_TOKEN=${TWILIO_AUTH_TOKEN:-mock_token}
+      - DEMO_MODE=true
+    depends_on:
+      - mongodb
+      - redis
+    volumes:
+      - worker-logs:/var/log/railmind
+
+  mongodb:
+    image: mongo:8.0
+    ports:
+      - "27017:27017"
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=root
+      - MONGO_INITDB_ROOT_PASSWORD=example
+    volumes:
+      - mongo-data:/data/db
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus-data:/prometheus
+
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/dashboards:/etc/grafana/provisioning/dashboards
+      - ./grafana/datasources:/etc/grafana/provisioning/datasources
+    depends_on:
+      - prometheus
+
+volumes:
+  mongo-data:
+  redis-data:
+  prometheus-data:
+  grafana-data:
+  api-logs:
+  worker-logs:

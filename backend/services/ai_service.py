@@ -1,8 +1,13 @@
 import json
 import os
+import aiohttp
 from pydantic import BaseModel, Field
 from langchain_anthropic import ChatAnthropic
+from langchain_ollama import ChatOllama
 from langchain_core.tools import tool
+from ..circuit_breaker import llm_circuit_breaker
+from ..monitoring import AGENT_TOKEN_CONSUMPTION
+from ..config import settings
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage, AIMessage
 
 from dotenv import load_dotenv # type: ignore
@@ -44,6 +49,21 @@ llm = ChatAnthropic(model="claude-3-5-sonnet-20241022", max_tokens=1024)
 llm_with_tools = llm.bind_tools(tools)
 structured_llm = llm.with_structured_output(MitigationPlan)
 tool_map = {tool.name: tool for tool in tools}
+
+@llm_circuit_breaker
+async def reason_with_ai_primary(messages, tools):
+    from langgraph.prebuilt import create_react_agent
+    llm = ChatAnthropic(model="claude-3-5-sonnet-20241022", max_tokens=1024, api_key=settings.ANTHROPIC_API_KEY.get_secret_value())
+    agent = create_react_agent(llm, tools)
+    result = await agent.ainvoke({"messages": messages})
+    return result, llm
+
+async def reason_with_ai_fallback(messages, tools):
+    from langgraph.prebuilt import create_react_agent
+    llm = ChatOllama(model=settings.OLLAMA_MODEL, base_url=settings.OLLAMA_URL)
+    agent = create_react_agent(llm, tools)
+    result = await agent.ainvoke({"messages": messages})
+    return result, llm
 
 async def reason_with_ai(anomalies: list, errors: list = None) -> dict:
     if not anomalies:
@@ -89,17 +109,21 @@ Previous errors from Supervisor (if any, please correct your plan):
         HumanMessage(content=user_prompt)
     ]
 
-    from langgraph.prebuilt import create_react_agent
-
-    agent = create_react_agent(llm, tools)
+    try:
+        result, llm_used = await reason_with_ai_primary(messages, tools)
+        AGENT_TOKEN_CONSUMPTION.labels(node='reason_node', model='claude').inc()
+    except Exception as e:
+        print(f"[RAILMIND] Primary AI Failed, falling back to local model: {e}")
+        try:
+            result, llm_used = await reason_with_ai_fallback(messages, tools)
+            AGENT_TOKEN_CONSUMPTION.labels(node='reason_node', model='ollama').inc()
+        except Exception as e_fallback:
+            print(f"[RAILMIND] Fallback AI also failed: {e_fallback}")
+            raise e_fallback
 
     try:
-        # Run autonomous tool-calling loop
-        result = await agent.ainvoke({"messages": messages})
         final_messages = result["messages"]
-
-        # Now that tool usage is done, force structured output
-        structured_llm = llm.with_structured_output(MitigationPlan)
+        structured_llm = llm_used.with_structured_output(MitigationPlan)
         final_plan: MitigationPlan = await structured_llm.ainvoke(final_messages)
         return final_plan.dict()
     except Exception as e:

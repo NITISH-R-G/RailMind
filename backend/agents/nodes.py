@@ -2,6 +2,7 @@ import os
 import json
 import logging
 import traceback
+import time
 from dotenv import load_dotenv
 from typing import Dict, Any, List
 from uuid import uuid4
@@ -12,6 +13,8 @@ from ..services.db_client import db_client
 from ..services.railways_api import get_live_train_status, get_cancelled_trains, mock_train_data, RailwaysAPIClient, get_multiple_trains
 from ..services.twilio_service import TwilioSMSClient
 from ..api.websocket import websocket_manager
+from ..config import settings
+from ..monitoring import NODE_EXECUTION_LATENCY, ERROR_RATES, AGENT_TOKEN_CONSUMPTION
 
 logger = logging.getLogger(__name__)
 
@@ -21,10 +24,7 @@ load_dotenv(dotenv_path=env_path)
 api_key = os.getenv("RAILWAYS_API_KEY", "mock_key")
 railways_client = RailwaysAPIClient(api_key=api_key)
 
-twilio_sid = os.getenv("TWILIO_ACCOUNT_SID", "mock_sid")
-twilio_token = os.getenv("TWILIO_AUTH_TOKEN", "mock_token")
-twilio_from = os.getenv("TWILIO_PHONE_NUMBER", "+1234567890")
-twilio_client = TwilioSMSClient(account_sid=twilio_sid, auth_token=twilio_token, from_number=twilio_from)
+twilio_client = TwilioSMSClient(account_sid=settings.TWILIO_ACCOUNT_SID, auth_token=settings.TWILIO_AUTH_TOKEN.get_secret_value(), from_number=settings.TWILIO_PHONE_NUMBER)
 
 # Shared log assistant that prints logs and broadcasts AGENT_LOG WebSocket events (ISSUE 4)
 async def log_agent(node_name: str, message: str):
@@ -39,6 +39,7 @@ async def log_agent(node_name: str, message: str):
         logger.error(f"Failed to broadcast AGENT_LOG message: {e}")
 
 async def ingest_node(state: AgentState) -> AgentState:
+    start_time = time.time()
     try:
         await log_agent("ingest_node", "[RAILMIND] Ingesting live train status from API feeds...")
         # Use dynamically provided train numbers from state if available
@@ -49,9 +50,6 @@ async def ingest_node(state: AgentState) -> AgentState:
                 "11057", "12627", "12625", "12621", "12615",
                 "12309", "12721", "12229", "12311", "12641"
             ]
-        
-        import time
-        start_time = time.time()
         
         client = railways_client
         print(f"[RAILMIND] Calling Railways API for {len(train_numbers)} trains...")
@@ -114,10 +112,14 @@ async def ingest_node(state: AgentState) -> AgentState:
         await log_agent("ingest_node", f"[RAILMIND] Ingested {len(live_trains)} trains")
     except Exception as e:
         logger.error(f"Error in ingest_node: {e}")
+        ERROR_RATES.labels(node='ingest_node', type=type(e).__name__).inc()
         await log_agent("ingest_node", f"[RAILMIND] [ERROR] Ingest node failed: {e}")
+    finally:
+        NODE_EXECUTION_LATENCY.labels(node='ingest_node').observe(time.time() - start_time)
     return state
 
 async def detect_node(state: AgentState) -> AgentState:
+    start_time = time.time()
     try:
         await log_agent("detect_node", "[RAILMIND] Running real-time anomaly detection rules...")
         anomalies: List[TrainAnomaly] = []
@@ -201,10 +203,14 @@ async def detect_node(state: AgentState) -> AgentState:
             state["should_continue"] = False
     except Exception as e:
         logger.error(f"Error in detect_node: {e}")
+        ERROR_RATES.labels(node='detect_node', type=type(e).__name__).inc()
         await log_agent("detect_node", f"[RAILMIND] [ERROR] Detect node failed: {e}")
+    finally:
+        NODE_EXECUTION_LATENCY.labels(node='detect_node').observe(time.time() - start_time)
     return state
 
 async def reason_node(state: AgentState) -> AgentState:
+    start_time = time.time()
     try:
         anomalies = state.get("anomalies", [])
         if not anomalies:
@@ -215,9 +221,6 @@ async def reason_node(state: AgentState) -> AgentState:
             return state
 
         await log_agent("reason_node", f"[RAILMIND] Contacting AI to reason about {len(anomalies)} anomalies...")
-        
-        import time
-        start_time = time.time()
         
         errors = state.get("errors", [])
         try:
@@ -239,12 +242,16 @@ async def reason_node(state: AgentState) -> AgentState:
             await log_agent("reason_node", "[RAILMIND] AI reasoning failed — using defaults")
     except Exception as e:
         logger.error(f"Error in reason_node: {e}")
+        ERROR_RATES.labels(node='reason_node', type=type(e).__name__).inc()
         await log_agent("reason_node", f"[RAILMIND] [ERROR] Reason node failed: {e}")
+    finally:
+        NODE_EXECUTION_LATENCY.labels(node='reason_node').observe(time.time() - start_time)
     return state
 
 from .routing import dijkstra_route_discovery
 
 async def reroute_node(state: AgentState) -> AgentState:
+    start_time = time.time()
     try:
         await log_agent("reroute_node", "[RAILMIND] Checking and resolving rerouting options...")
         anomalies = state.get("anomalies", [])
@@ -274,10 +281,14 @@ async def reroute_node(state: AgentState) -> AgentState:
                     return {"reroute_plan": f"No reroute available: {status_msg}"}
     except Exception as e:
         logger.error(f"Error in reroute_node: {e}")
+        ERROR_RATES.labels(node='reroute_node', type=type(e).__name__).inc()
         await log_agent("reroute_node", f"[RAILMIND] [ERROR] Reroute node failed: {e}")
+    finally:
+        NODE_EXECUTION_LATENCY.labels(node='reroute_node').observe(time.time() - start_time)
     return {}
 
 async def coordination_node(state: AgentState) -> AgentState:
+    start_time = time.time()
     try:
         await log_agent("coordination_node", "[RAILMIND] Initiating department task dispatches...")
         claude_json = state.get("claude_reasoning", "{}")
@@ -355,10 +366,14 @@ async def coordination_node(state: AgentState) -> AgentState:
         return {"department_tasks": department_tasks}
     except Exception as e:
         logger.error(f"Error in coordination_node: {e}")
+        ERROR_RATES.labels(node='coordination_node', type=type(e).__name__).inc()
         await log_agent("coordination_node", f"[RAILMIND] [ERROR] Coordination node failed: {e}")
+    finally:
+        NODE_EXECUTION_LATENCY.labels(node='coordination_node').observe(time.time() - start_time)
     return {}
 
 async def alert_node(state: AgentState) -> AgentState:
+    start_time = time.time()
     try:
         await log_agent("alert_node", "[RAILMIND] Sending Twilio notifications...")
         m_phone = os.getenv("MAINTENANCE_PHONE", "+1234567891")
@@ -410,11 +425,15 @@ async def alert_node(state: AgentState) -> AgentState:
         return {"sms_alerts_sent": sent_sms}
     except Exception as e:
         logger.error(f"Error in alert_node: {e}")
+        ERROR_RATES.labels(node='alert_node', type=type(e).__name__).inc()
         await log_agent("alert_node", f"[RAILMIND] [ERROR] Alert node failed: {e}")
+    finally:
+        NODE_EXECUTION_LATENCY.labels(node='alert_node').observe(time.time() - start_time)
     return {}
 
 
 async def report_node(state: AgentState) -> AgentState:
+    start_time = time.time()
     try:
         await log_agent("report_node", "[RAILMIND] Broadcasting operations report...")
         
@@ -490,7 +509,10 @@ async def report_node(state: AgentState) -> AgentState:
 
     except Exception as e:
         logger.error(f"Error in report_node: {e}")
+        ERROR_RATES.labels(node='report_node', type=type(e).__name__).inc()
         await log_agent("report_node", f"[RAILMIND] [ERROR] Report node failed: {e}")
+    finally:
+        NODE_EXECUTION_LATENCY.labels(node='report_node').observe(time.time() - start_time)
     return {}
 
 async def supervisor_node(state: AgentState) -> dict:
