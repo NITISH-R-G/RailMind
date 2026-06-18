@@ -176,10 +176,39 @@ class FallbackDB:
             await self._write_fallback(data)
             return True
 
-    async def get_incidents(self, limit=20):
+    def _filter_fallback_incidents(self, incidents, cutoff):
+        if not cutoff:
+            return incidents
+        filtered = []
+        for inc in incidents:
+            ts_str = inc.get("timestamp")
+            if not ts_str:
+                continue
+            try:
+                if isinstance(ts_str, datetime):
+                    ts = ts_str
+                else:
+                    ts = datetime.fromisoformat(str(ts_str).replace("Z", "+00:00"))
+                if ts.tzinfo is not None:
+                    ts = ts.replace(tzinfo=None)
+                if ts >= cutoff:
+                    filtered.append(inc)
+            except Exception:
+                pass
+        return filtered
+
+    async def get_incidents(self, limit=20, cutoff=None):
         if not self.use_fallback:
             try:
-                cursor = self.db["incidents"].find().sort("timestamp", -1).limit(limit)
+                query = {}
+                if cutoff:
+                    query = {
+                        "$or": [
+                            {"timestamp": {"$gte": cutoff}},
+                            {"timestamp": {"$gte": cutoff.isoformat()}}
+                        ]
+                    }
+                cursor = self.db["incidents"].find(query).sort("timestamp", -1).limit(limit)
                 incidents = await cursor.to_list(length=limit)
                 for inc in incidents:
                     inc["_id"] = str(inc["_id"])
@@ -191,7 +220,7 @@ class FallbackDB:
         # Fallback
         async with self._lock:
             data = await self._read_fallback()
-            incidents = data["incidents"]
+            incidents = self._filter_fallback_incidents(data.get("incidents", []), cutoff)
             try:
                 incidents = sorted(incidents, key=lambda x: x.get("timestamp", ""), reverse=True)
             except Exception:

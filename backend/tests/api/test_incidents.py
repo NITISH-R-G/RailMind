@@ -12,10 +12,11 @@ def mock_db_client():
 @pytest.mark.asyncio
 async def test_get_incidents_api_filter_24h(mock_db_client):
     now = datetime.now(timezone.utc)
+    # The API now relies on the DB client to do the filtering, so we mock the DB client
+    # to return the filtered results
     mock_db_client.get_incidents = AsyncMock(return_value=[
         {"id": "1", "timestamp": now.isoformat()},
-        {"id": "2", "timestamp": (now - timedelta(hours=12)).isoformat()},
-        {"id": "3", "timestamp": (now - timedelta(hours=48)).isoformat()}
+        {"id": "2", "timestamp": (now - timedelta(hours=12)).isoformat()}
     ])
 
     transport = ASGITransport(app=app)
