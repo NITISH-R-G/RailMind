@@ -56,3 +56,4 @@ Thumbs.db
 
 # === MongoDB local fallback data ===
 backend/data/*.json
+frontend/coverage/
