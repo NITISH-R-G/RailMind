@@ -232,7 +232,7 @@ async def ingest_node(state: AgentState) -> AgentState:
         await log_agent("ingest_node", f"[RAILMIND] Ingested {len(live_trains)} trains")
     except Exception as e:
         logger.error(f"Error in ingest_node: {e}")
-        await log_agent("ingest_node", f"[RAILMIND] [ERROR] Ingest node failed: {e}")
+        await log_agent("ingest_node", f"[RAILMIND] [ERROR] Ingestion failed: {e}")
     return state
 
 async def detect_node(state: AgentState) -> AgentState:
