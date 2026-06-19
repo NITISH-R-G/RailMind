@@ -38,12 +38,14 @@ async def test_reason_with_ai_success(mock_generate_content):
     assert result == expected_response
 
 @pytest.mark.asyncio
-@patch("backend.services.ai_service.ChatAnthropic.ainvoke", new_callable=AsyncMock)
-async def test_reason_with_ai_fallback_exception(mock_generate_content):
-    mock_generate_content.side_effect = Exception("API Error")
+@patch("langgraph.prebuilt.create_react_agent")
+async def test_reason_with_ai_fallback_exception(mock_create_agent):
+    mock_agent = AsyncMock()
+    mock_agent.ainvoke.side_effect = Exception("API Error")
+    mock_create_agent.return_value = mock_agent
 
     anomalies = [{"train_name": "Test Train", "train_number": "123", "delay_minutes": 10}]
-    try:
-        result = await reason_with_ai(anomalies)
-    except Exception:
-        pass
+    result = await reason_with_ai(anomalies)
+
+    assert "incident_title" in result
+    assert "situation_summary" in result

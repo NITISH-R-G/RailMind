@@ -19,6 +19,7 @@ workflow.add_node("coordination_node", coordination_node)
 workflow.add_node("alert_node", alert_node)
 workflow.add_node("report_node", report_node)
 
+# Entry point is evaluate_previous_action
 workflow.set_entry_point("evaluate_previous_action")
 
 def route_from_supervisor(state: AgentState) -> str:
@@ -28,17 +29,7 @@ def route_from_supervisor(state: AgentState) -> str:
     return next_node
 
 workflow.add_edge("evaluate_previous_action", "ingest_node")
-workflow.add_edge("ingest_node", "detect_node")
-workflow.add_edge("detect_node", "predict_node")
-workflow.add_edge("predict_node", "supervisor_node")
-
-# All worker nodes return back to the supervisor
-workflow.add_edge("detect_node", "supervisor_node")
-workflow.add_edge("reason_node", "supervisor_node")
-workflow.add_edge("reroute_node", "supervisor_node")
-workflow.add_edge("coordination_node", "supervisor_node")
-workflow.add_edge("alert_node", "supervisor_node")
-workflow.add_edge("report_node", END)
+workflow.add_edge("ingest_node", "supervisor_node")
 
 # Supervisor dynamically dispatches
 workflow.add_conditional_edges(
@@ -46,6 +37,7 @@ workflow.add_conditional_edges(
     route_from_supervisor,
     {
         "detect_node": "detect_node",
+        "predict_node": "predict_node",
         "reason_node": "reason_node",
         "reroute_node": "reroute_node",
         "coordination_node": "coordination_node",
@@ -54,6 +46,15 @@ workflow.add_conditional_edges(
         END: END
     }
 )
+
+# All worker nodes return back to the supervisor
+workflow.add_edge("detect_node", "supervisor_node")
+workflow.add_edge("predict_node", "supervisor_node")
+workflow.add_edge("reason_node", "supervisor_node")
+workflow.add_edge("reroute_node", "supervisor_node")
+workflow.add_edge("coordination_node", "supervisor_node")
+workflow.add_edge("alert_node", "supervisor_node")
+workflow.add_edge("report_node", END)
 
 from langgraph.checkpoint.memory import MemorySaver
 checkpointer = MemorySaver()

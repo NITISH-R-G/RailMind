@@ -89,7 +89,8 @@ async def test_supervisor_self_correction():
         "next_node": "",
         "last_node_executed": "reason_node",
         "messages": [],
-        "tools_used": []
+        "tools_used": [],
+        "prediction": {"mock": "prediction_exists_to_bypass_node"}
     }
 
     from backend.agents.nodes import supervisor_node
