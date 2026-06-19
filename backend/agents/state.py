@@ -21,6 +21,13 @@ class TrainAnomaly(TypedDict):
     location: str
     delay_minutes: Optional[int]
     passenger_load: Optional[str]
+    current_station: Optional[str]
+    status: Optional[str]
+    source: Optional[str]
+    destination: Optional[str]
+    station_code: Optional[str]
+    lat: Optional[float]
+    lng: Optional[float]
 
 class DepartmentTask(TypedDict):
     department: str    # "maintenance", "operations", "station_manager"
@@ -54,4 +61,4 @@ class AgentState(TypedDict):
     incident_history: Optional[List[dict]]
     prediction: Optional[dict]
     memory_used: Optional[str]
-
+    sub_agent_logs: Annotated[List[dict], operator.add]
