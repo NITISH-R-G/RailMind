@@ -3,13 +3,13 @@ import json
 import logging
 import traceback
 from dotenv import load_dotenv
-from typing import Dict, Any, List
+
 from uuid import uuid4
 from datetime import datetime
 from ..services.ai_service import reason_with_ai
 from .state import AgentState, TrainAnomaly, DepartmentTask
 from ..services.db_client import db_client
-from ..services.railways_api import get_live_train_status, get_cancelled_trains, mock_train_data, RailwaysAPIClient, get_multiple_trains
+from ..services.railways_api import get_cancelled_trains, mock_train_data, RailwaysAPIClient
 from ..services.twilio_service import TwilioSMSClient
 from ..api.websocket import websocket_manager
 
