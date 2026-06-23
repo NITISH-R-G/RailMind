@@ -11,3 +11,7 @@ httpx
 websockets
 arq
 redis
+pydantic-settings
+python-json-logger
+prometheus-client
+google-genai

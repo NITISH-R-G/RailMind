@@ -1,0 +1,112 @@
+version: '3.8'
+
+services:
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: railmind_api
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - MONGODB_URI=mongodb://admin:adminpassword@mongo:27017/railmind?authSource=admin
+      - REDIS_HOST=redis
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-mock_key}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-mock_key}
+      - TWILIO_ACCOUNT_SID=${TWILIO_ACCOUNT_SID:-mock_sid}
+      - TWILIO_AUTH_TOKEN=${TWILIO_AUTH_TOKEN:-mock_token}
+      - ADMIN_USERNAME=${ADMIN_USERNAME:-admin}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin_pass_123}
+      - RAILWAYS_API_KEY=${RAILWAYS_API_KEY:-mock_key}
+    depends_on:
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    volumes:
+      - app_logs:/var/log/railmind
+
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: railmind_worker
+    restart: unless-stopped
+    command: ["arq", "backend.worker.WorkerSettings"]
+    environment:
+      - MONGODB_URI=mongodb://admin:adminpassword@mongo:27017/railmind?authSource=admin
+      - REDIS_HOST=redis
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-mock_key}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-mock_key}
+      - TWILIO_ACCOUNT_SID=${TWILIO_ACCOUNT_SID:-mock_sid}
+      - TWILIO_AUTH_TOKEN=${TWILIO_AUTH_TOKEN:-mock_token}
+    depends_on:
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      api:
+        condition: service_started
+    volumes:
+      - app_logs:/var/log/railmind
+
+  mongo:
+    image: mongo:8.0
+    container_name: railmind_mongo
+    restart: always
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=admin
+      - MONGO_INITDB_ROOT_PASSWORD=adminpassword
+      - MONGO_INITDB_DATABASE=railmind
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/test --quiet
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: railmind_redis
+    restart: always
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: railmind_prometheus
+    restart: always
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: railmind_grafana
+    restart: always
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - prometheus
+
+volumes:
+  mongo_data:
+  redis_data:
+  prometheus_data:
+  grafana_data:
+  app_logs:

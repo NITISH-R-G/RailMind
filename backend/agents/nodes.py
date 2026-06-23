@@ -2,6 +2,9 @@ import os
 import json
 import logging
 import traceback
+import time
+from pythonjsonlogger import jsonlogger
+from logging.handlers import RotatingFileHandler
 from dotenv import load_dotenv
 from typing import Dict, Any, List
 from uuid import uuid4
@@ -12,8 +15,17 @@ from ..services.db_client import db_client
 from ..services.railways_api import get_live_train_status, get_cancelled_trains, mock_train_data, RailwaysAPIClient, get_multiple_trains
 from ..services.twilio_service import TwilioSMSClient
 from ..api.websocket import websocket_manager
+from ..metrics import NODE_LATENCY, ERROR_RATE
 
+# Set up JSON structured logging
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+log_dir = os.getenv("LOG_DIR", "./logs")
+os.makedirs(log_dir, exist_ok=True)
+handler = RotatingFileHandler(f"{log_dir}/app.json", maxBytes=5000000, backupCount=3)
+formatter = jsonlogger.JsonFormatter('%(asctime)s %(levelname)s %(name)s %(message)s')
+handler.setFormatter(formatter)
+logger.addHandler(handler)
 
 # Ensure env variables are loaded before configuration
 env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
@@ -57,6 +69,7 @@ async def log_agent(node_name: str, message: str):
         logger.error(f"Failed to broadcast AGENT_LOG / AGENT_STATE_CHANGE message: {e}")
 
 async def evaluate_previous_action(state: AgentState) -> AgentState:
+    start_time_metric = time.time()
     try:
         await log_agent("evaluate_previous_action", "[RAILMIND] Checking and evaluating previous self-healing actions...")
         
@@ -149,10 +162,14 @@ async def evaluate_previous_action(state: AgentState) -> AgentState:
                         })
     except Exception as e:
         logger.error(f"Error in evaluate_previous_action: {e}")
+        ERROR_RATE.labels(node_name="evaluate_previous_action", error_type=type(e).__name__).inc()
         await log_agent("evaluate_previous_action", f"[RAILMIND] [ERROR] Self-healing evaluation failed: {e}")
+    finally:
+        NODE_LATENCY.labels(node_name="evaluate_previous_action").observe(time.time() - start_time_metric)
     return state
 
 async def ingest_node(state: AgentState) -> AgentState:
+    start_time_metric = time.time()
     try:
         await log_agent("SCANNING", "Polling 15 trains on Indian Railways...")
         # If evaluate_previous_action already populated the raw train data, reuse it
@@ -232,10 +249,14 @@ async def ingest_node(state: AgentState) -> AgentState:
         await log_agent("ingest_node", f"[RAILMIND] Ingested {len(live_trains)} trains")
     except Exception as e:
         logger.error(f"Error in ingest_node: {e}")
+        ERROR_RATE.labels(node_name="ingest_node", error_type=type(e).__name__).inc()
         await log_agent("ingest_node", f"[RAILMIND] [ERROR] Ingest node failed: {e}")
+    finally:
+        NODE_LATENCY.labels(node_name="ingest_node").observe(time.time() - start_time_metric)
     return state
 
 async def detect_node(state: AgentState) -> AgentState:
+    start_time_metric = time.time()
     try:
         await log_agent("detect_node", "[RAILMIND] Running real-time anomaly detection rules...")
         anomalies: List[TrainAnomaly] = []
@@ -365,7 +386,10 @@ async def detect_node(state: AgentState) -> AgentState:
             state["should_continue"] = False
     except Exception as e:
         logger.error(f"Error in detect_node: {e}")
+        ERROR_RATE.labels(node_name="detect_node", error_type=type(e).__name__).inc()
         await log_agent("detect_node", f"[RAILMIND] [ERROR] Detect node failed: {e}")
+    finally:
+        NODE_LATENCY.labels(node_name="detect_node").observe(time.time() - start_time_metric)
     return state
 
 def get_station_code_from_name(station_name: str) -> str:
@@ -438,6 +462,7 @@ async def detect_cascade(anomalies: list) -> dict:
     return {"is_cascade": False}
 
 async def predict_node(state: AgentState) -> AgentState:
+    start_time_metric = time.time()
     try:
         await log_agent("predict_node", "[RAILMIND] Running predictive intelligence model...")
         anomalies = state.get("anomalies", [])
@@ -480,7 +505,10 @@ async def predict_node(state: AgentState) -> AgentState:
             logger.error(f"Failed to broadcast prediction update: {e}")
     except Exception as e:
         logger.error(f"Error in predict_node: {e}")
+        ERROR_RATE.labels(node_name="predict_node", error_type=type(e).__name__).inc()
         await log_agent("predict_node", f"[RAILMIND] [ERROR] Predictive intelligence failed: {e}")
+    finally:
+        NODE_LATENCY.labels(node_name="predict_node").observe(time.time() - start_time_metric)
     return state
 
 async def broadcast_log(stage: str, message: str):
@@ -745,6 +773,8 @@ async def execute_tool(tool_name: str, params: dict, reason: str, state: AgentSt
         await log_agent("reason_node", f"[TOOL SUCCESS] Incident escalated to Central Control Room: {summary}")
 
 async def reason_node(state: AgentState) -> AgentState:
+    import time
+    start_time_metric = time.time()
     try:
         anomalies = state.get("anomalies", [])
         if not anomalies:
@@ -908,12 +938,16 @@ async def reason_node(state: AgentState) -> AgentState:
         
     except Exception as e:
         logger.error(f"Error in reason_node: {e}")
+        ERROR_RATE.labels(node_name="reason_node", error_type=type(e).__name__).inc()
         await log_agent("reason_node", f"[RAILMIND] [ERROR] Reason node failed: {e}")
+    finally:
+        NODE_LATENCY.labels(node_name="reason_node").observe(time.time() - start_time_metric)
     return state
 
 from .routing import dijkstra_route_discovery
 
 async def reroute_node(state: AgentState) -> AgentState:
+    start_time_metric = time.time()
     try:
         await log_agent("reroute_node", "[RAILMIND] Checking and resolving rerouting options...")
         anomalies = state.get("anomalies", [])
@@ -954,10 +988,14 @@ async def reroute_node(state: AgentState) -> AgentState:
                     }
     except Exception as e:
         logger.error(f"Error in reroute_node: {e}")
+        ERROR_RATE.labels(node_name="reroute_node", error_type=type(e).__name__).inc()
         await log_agent("reroute_node", f"[RAILMIND] [ERROR] Reroute node failed: {e}")
+    finally:
+        NODE_LATENCY.labels(node_name="reroute_node").observe(time.time() - start_time_metric)
     return {"detour_route": []}
 
 async def coordination_node(state: AgentState) -> AgentState:
+    start_time_metric = time.time()
     try:
         await log_agent("coordination_node", "[RAILMIND] Initiating department task dispatches...")
         claude_json = state.get("claude_reasoning", "{}")
@@ -1060,10 +1098,14 @@ async def coordination_node(state: AgentState) -> AgentState:
         return {"department_tasks": department_tasks}
     except Exception as e:
         logger.error(f"Error in coordination_node: {e}")
+        ERROR_RATE.labels(node_name="coordination_node", error_type=type(e).__name__).inc()
         await log_agent("coordination_node", f"[RAILMIND] [ERROR] Coordination node failed: {e}")
+    finally:
+        NODE_LATENCY.labels(node_name="coordination_node").observe(time.time() - start_time_metric)
     return {}
 
 async def alert_node(state: AgentState) -> AgentState:
+    start_time_metric = time.time()
     try:
         await log_agent("alert_node", "[RAILMIND] Sending Twilio notifications...")
         m_phone = os.getenv("MAINTENANCE_PHONE", "+1234567891")
@@ -1115,7 +1157,10 @@ async def alert_node(state: AgentState) -> AgentState:
         return {"sms_alerts_sent": sent_sms}
     except Exception as e:
         logger.error(f"Error in alert_node: {e}")
+        ERROR_RATE.labels(node_name="alert_node", error_type=type(e).__name__).inc()
         await log_agent("alert_node", f"[RAILMIND] [ERROR] Alert node failed: {e}")
+    finally:
+        NODE_LATENCY.labels(node_name="alert_node").observe(time.time() - start_time_metric)
     return {}
 
 async def save_incident_if_not_duplicate(incident):
@@ -1131,6 +1176,7 @@ async def save_incident_if_not_duplicate(incident):
     return True
 
 async def report_node(state: AgentState) -> AgentState:
+    start_time_metric = time.time()
     try:
         await log_agent("report_node", "[RAILMIND] Broadcasting operations report...")
         
@@ -1296,10 +1342,14 @@ async def report_node(state: AgentState) -> AgentState:
 
     except Exception as e:
         logger.error(f"Error in report_node: {e}")
+        ERROR_RATE.labels(node_name="report_node", error_type=type(e).__name__).inc()
         await log_agent("report_node", f"[RAILMIND] [ERROR] Report node failed: {e}")
+    finally:
+        NODE_LATENCY.labels(node_name="report_node").observe(time.time() - start_time_metric)
     return {}
 
 async def supervisor_node(state: AgentState) -> dict:
+    start_time_metric = time.time()
     try:
         last_node = state.get("last_node_executed")
         await log_agent("supervisor_node", f"[RAILMIND] Supervisor evaluating graph state... (Last execution: {last_node})")
@@ -1355,5 +1405,8 @@ async def supervisor_node(state: AgentState) -> dict:
     except Exception as e:
          logger.exception("Error in supervisor_node")
          tb = traceback.format_exc()
+         ERROR_RATE.labels(node_name="supervisor_node", error_type=type(e).__name__).inc()
          await log_agent("supervisor_node", f"[RAILMIND] [ERROR] Supervisor node failed: {e}\n{tb}")
          return {"next_node": "END", "last_node_executed": "supervisor_node"}
+    finally:
+         NODE_LATENCY.labels(node_name="supervisor_node").observe(time.time() - start_time_metric)

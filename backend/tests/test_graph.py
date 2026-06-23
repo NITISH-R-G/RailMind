@@ -47,7 +47,9 @@ async def test_reason_node_tool_recovery():
     }
 
     # We mock the chat model to raise an exception during the react loop
-    with patch('langgraph.prebuilt.create_react_agent') as mock_create_agent:
+    with patch('langgraph.prebuilt.create_react_agent') as mock_create_agent, \
+         patch('backend.services.ai_service.local_llama_fallback', return_value={}) as mock_llama, \
+         patch('backend.circuit_breaker.CircuitBreaker.can_execute', return_value=True):
         mock_agent = MagicMock()
         mock_agent.ainvoke.side_effect = Exception("Simulated Tool Failure!")
         mock_create_agent.return_value = mock_agent
@@ -60,8 +62,8 @@ async def test_reason_node_tool_recovery():
         assert new_state.get("claude_reasoning") is not None
 
         parsed = json.loads(new_state["claude_reasoning"])
-        assert "situation_summary" in parsed
-        assert "delayed" in parsed["situation_summary"]
+        assert "situation" in parsed["perception"]
+        assert "Network stress" in parsed["perception"]["situation"]
 
 @pytest.mark.asyncio
 async def test_supervisor_self_correction():

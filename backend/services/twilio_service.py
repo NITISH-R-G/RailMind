@@ -1,6 +1,8 @@
 from twilio.rest import Client # type: ignore
 import os
 from typing import Optional
+from ..circuit_breaker import twilio_breaker
+from ..metrics import TWILIO_STATUS
 
 account_sid = os.getenv("TWILIO_ACCOUNT_SID")
 auth_token = os.getenv("TWILIO_AUTH_TOKEN")
@@ -20,21 +22,33 @@ async def send_sms(to: str, message: str) -> bool:
     # Check DEMO_MODE to bypass real SMS charges
     if os.getenv("DEMO_MODE") == "true":
         print(f"[DEMO SMS ALERT] Bypassed sending to {to}: {message}")
+        TWILIO_STATUS.labels(status="demo").inc()
         return True
+
+    if not client:
+        print(f"[RAILMIND] Twilio Client not configured. Skipped sending message to {to}: {message}")
+        TWILIO_STATUS.labels(status="unconfigured").inc()
+        return False
+
+    if not twilio_breaker.can_execute():
+        print("[RAILMIND] Twilio Circuit Breaker OPEN. Dropping SMS.")
+        TWILIO_STATUS.labels(status="dropped").inc()
+        return False
+
     try:
-        if client:
-            msg = client.messages.create(
-                body=message[:160],
-                from_=from_number,
-                to=to
-            )
-            print(f"[RAILMIND] SMS sent to {to}: {msg.sid}")
-            return True
-        else:
-            print(f"[RAILMIND] Twilio Client not configured. Skipped sending message to {to}: {message}")
-            return False
+        msg = client.messages.create(
+            body=message[:160],
+            from_=from_number,
+            to=to
+        )
+        print(f"[RAILMIND] SMS sent to {to}: {msg.sid}")
+        twilio_breaker.record_success()
+        TWILIO_STATUS.labels(status="success").inc()
+        return True
     except Exception as e:
         print(f"[RAILMIND] SMS failed: {e}")
+        twilio_breaker.record_failure()
+        TWILIO_STATUS.labels(status="failure").inc()
         return False
 
 async def send_department_alerts(department_tasks: list) -> list:
@@ -73,19 +87,31 @@ class TwilioSMSClient:
     async def send_incident_alert(self, to_number: str, message_body: str) -> Optional[str]:
         if os.getenv("DEMO_MODE") == "true":
             print(f"[DEMO SMS CLIENT] Bypassed sending to {to_number}: {message_body}")
+            TWILIO_STATUS.labels(status="demo").inc()
             return "SMdemo1234567890abcdef"
+
+        if not self.client:
+            print(f"[RAILMIND] TwilioSMSClient not configured. Skipped sending message to {to_number}: {message_body}")
+            TWILIO_STATUS.labels(status="unconfigured").inc()
+            return None
+
+        if not twilio_breaker.can_execute():
+            print("[RAILMIND] Twilio Circuit Breaker OPEN. Dropping SMS.")
+            TWILIO_STATUS.labels(status="dropped").inc()
+            return None
+
         try:
-            if self.client:
-                msg = self.client.messages.create(
-                    body=message_body[:160],
-                    from_=self.from_number,
-                    to=to_number
-                )
-                print(f"[RAILMIND] SMS sent via TwilioSMSClient to {to_number}: {msg.sid}")
-                return msg.sid
-            else:
-                print(f"[RAILMIND] TwilioSMSClient not configured. Skipped sending message to {to_number}: {message_body}")
-                return None
+            msg = self.client.messages.create(
+                body=message_body[:160],
+                from_=self.from_number,
+                to=to_number
+            )
+            print(f"[RAILMIND] SMS sent via TwilioSMSClient to {to_number}: {msg.sid}")
+            twilio_breaker.record_success()
+            TWILIO_STATUS.labels(status="success").inc()
+            return msg.sid
         except Exception as e:
             print(f"[RAILMIND] TwilioSMSClient send failed: {e}")
+            twilio_breaker.record_failure()
+            TWILIO_STATUS.labels(status="failure").inc()
             raise e
