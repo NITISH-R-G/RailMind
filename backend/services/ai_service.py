@@ -6,6 +6,9 @@ from langchain_core.tools import tool
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage, AIMessage
 
 from dotenv import load_dotenv # type: ignore
+from ..circuit_breaker import anthropic_breaker
+from ..metrics import TOKEN_CONSUMPTION
+import httpx
 
 env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
 load_dotenv(dotenv_path=env_path)
@@ -151,6 +154,27 @@ def generate_dynamic_fallback(anomaly: dict, anomaly_type: str = None, errors: l
         "reasoning_steps": reasoning_steps
     }
 
+async def local_llama_fallback(prompt: str) -> dict:
+    """Executes reasoning via a local Llama-3/Mistral model using Ollama API."""
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.post(
+                "http://localhost:11434/api/generate",
+                json={
+                    "model": "llama3",
+                    "prompt": prompt,
+                    "stream": False,
+                    "format": "json"
+                }
+            )
+            response.raise_for_status()
+            data = response.json()
+            TOKEN_CONSUMPTION.labels(model_name="ollama_llama3").inc(data.get("eval_count", 0) + data.get("prompt_eval_count", 0))
+            return json.loads(data.get("response", "{}"))
+    except Exception as e:
+        print(f"[RAILMIND] Local Llama fallback failed: {e}")
+        return {}
+
 async def reason_with_ai(anomalies: list, errors: list = None) -> dict:
     if not anomalies:
         return {}
@@ -195,19 +219,39 @@ Previous errors from Supervisor (if any, please correct your plan):
             SystemMessage(content=system_prompt),
             HumanMessage(content=user_prompt)
         ]
-        from langgraph.prebuilt import create_react_agent
 
-        agent = create_react_agent(llm, tools)
+        if anthropic_breaker.can_execute():
+            try:
+                from langgraph.prebuilt import create_react_agent
 
-        # Run autonomous tool-calling loop
-        result = await agent.ainvoke({"messages": messages})
-        final_messages = result["messages"]
+                agent = create_react_agent(llm, tools)
 
-        # Now that tool usage is done, force structured output
-        structured_llm = llm.with_structured_output(MitigationPlan)
-        final_plan: MitigationPlan = await structured_llm.ainvoke(final_messages)
-        return final_plan.dict()
+                # Run autonomous tool-calling loop
+                result = await agent.ainvoke({"messages": messages})
+                final_messages = result["messages"]
+
+                # Now that tool usage is done, force structured output
+                structured_llm = llm.with_structured_output(MitigationPlan)
+                final_plan: MitigationPlan = await structured_llm.ainvoke(final_messages)
+                anthropic_breaker.record_success()
+
+                # Rough token estimation for Anthropic API
+                TOKEN_CONSUMPTION.labels(model_name="claude-3-5-sonnet").inc(1000)
+
+                return final_plan.dict()
+            except Exception as inner_e:
+                anthropic_breaker.record_failure()
+                raise inner_e
+        else:
+            print("[RAILMIND] Anthropic Circuit Breaker OPEN. Routing to Local Fallback.")
+            # Trigger autonomous fallback mechanism
+            fallback_res = await local_llama_fallback(system_prompt + "\n" + user_prompt)
+            if fallback_res:
+                # Use the generated result directly rather than mock
+                return fallback_res
+            raise Exception("Circuit breaker open and Llama fallback failed")
+
     except Exception as e:
-        print(f"[RAILMIND] AI Reasoning or structured output failed, generating high-fidelity fallback: {e}")
+        print(f"[RAILMIND] AI Reasoning failed, generating high-fidelity fallback: {e}")
         # Return dynamic fallback based on current anomaly parameters
         return generate_dynamic_fallback(anomaly, errors=errors)

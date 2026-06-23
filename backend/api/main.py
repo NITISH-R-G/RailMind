@@ -13,12 +13,15 @@ from fastapi import FastAPI, WebSocket, HTTPException, Depends, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from ..services.db_client import db_client
+from ..metrics import metrics_app
 
 security = HTTPBasic()
 
+from ..config import settings
+
 def verify_admin(credentials: HTTPBasicCredentials = Depends(security)):
-    admin_user = os.getenv("ADMIN_USERNAME", "admin")
-    admin_pass = os.getenv("ADMIN_PASSWORD")
+    admin_user = settings.admin_username
+    admin_pass = settings.admin_password
     if not admin_pass:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -57,7 +60,7 @@ app.add_middleware(
 )
 
 # Initialize railways client for fallback train list queries
-api_key = os.getenv("RAILWAYS_API_KEY", "mock_key")
+api_key = settings.railways_api_key
 railways_client = RailwaysAPIClient(api_key=api_key)
 
 # Global reference storing the most recent loop state from the agent background thread
@@ -154,6 +157,9 @@ async def startup_event():
 
     # Run the agent workflow loop asynchronously in the background on API startup
     asyncio.create_task(run_agent_loop_fallback())
+
+# Mount prometheus metrics endpoint
+app.mount("/metrics", metrics_app)
 
 # Include general REST routers
 app.include_router(router, prefix="/api")
@@ -260,14 +266,14 @@ async def get_system_status():
         pass
 
     # Railways API
-    railways_api_key = os.getenv("RAILWAYS_API_KEY", "")
+    railways_api_key = settings.railways_api_key
     rapidapi_key = os.getenv("RAPIDAPI_KEY", "")
-    is_railways_connected = (railways_api_key not in ["", "your_railways_api_key_here"]) or (rapidapi_key not in ["", "your_key_here"])
+    is_railways_connected = (railways_api_key not in ["", "your_railways_api_key_here", "mock_key"]) or (rapidapi_key not in ["", "your_key_here"])
     railways_status = "Connected" if is_railways_connected else "Disconnected"
 
     # Twilio SMS
-    twilio_sid = os.getenv("TWILIO_ACCOUNT_SID", "")
-    twilio_token = os.getenv("TWILIO_AUTH_TOKEN", "")
+    twilio_sid = settings.twilio_account_sid
+    twilio_token = settings.twilio_auth_token
     is_twilio_connected = twilio_sid not in ["", "mock_sid"] and twilio_token not in ["", "mock_token"]
     twilio_status = "Connected" if is_twilio_connected else "Disconnected"
 
