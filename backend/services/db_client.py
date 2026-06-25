@@ -249,8 +249,8 @@ class FallbackDB:
                 await self._write_fallback(data)
             return modified_count
 
-    async def approve_incident(self, incident_id):
-        # Retrieve incident details first to save in memory
+    async def _resolve_and_save_incident_memory(self, incident_id, custom_decision=None):
+        """Helper to deduplicate memory saving logic for approve and override incident."""
         incident = None
         if not self.use_fallback:
             try:
@@ -273,13 +273,11 @@ class FallbackDB:
                         incident = inc
                         break
 
-        # If found, save to memory
         if incident:
             try:
                 train_number = incident.get("train_number", "Unknown")
                 current_station = incident.get("current_station") or incident.get("location") or "Unknown"
                 station_code = get_station_code(current_station)
-                reroute_plan = incident.get("reroute_plan") or "Redirect via loop lines"
                 
                 time_str = "12:00-14:00"
                 try:
@@ -295,7 +293,11 @@ class FallbackDB:
                     pass
                 
                 pattern = f"Train {train_number} is frequently delayed at {station_code} between {time_str}"
-                effectiveness = f"{reroute_plan} recovered avg 18 mins for {station_code} delays"
+                if custom_decision:
+                    effectiveness = f"Human Override ({custom_decision}) executed"
+                else:
+                    reroute_plan = incident.get("reroute_plan") or "Redirect via loop lines"
+                    effectiveness = f"{reroute_plan} recovered avg 18 mins for {station_code} delays"
                 escalations = f"{train_number} needed escalation 2x this week"
                 
                 from datetime import timezone
@@ -309,7 +311,10 @@ class FallbackDB:
                 }
                 await self.save_memory(memory_item)
             except Exception as e:
-                logger.error(f"Error creating/saving memory in approve_incident: {e}")
+                logger.error(f"Error creating/saving memory for incident: {e}")
+
+    async def approve_incident(self, incident_id):
+        await self._resolve_and_save_incident_memory(incident_id)
 
         # Now approve the incident
         if not self.use_fallback:
@@ -340,65 +345,7 @@ class FallbackDB:
             return modified_count
 
     async def override_incident(self, incident_id, custom_decision):
-        # Retrieve incident details first to save in memory
-        incident = None
-        if not self.use_fallback:
-            try:
-                from bson import ObjectId
-                query = {}
-                try:
-                    query = {"_id": ObjectId(incident_id)}
-                except Exception:
-                    query = {"incident_id": incident_id}
-                incident = await self.db["incidents"].find_one(query)
-            except Exception as e:
-                logger.warning(f"MongoDB find incident for override failed: {e}. Falling back.")
-                self.use_fallback = True
-
-        if self.use_fallback or not incident:
-            async with self._lock:
-                data = await self._read_fallback()
-                for inc in data["incidents"]:
-                    if inc.get("incident_id") == incident_id or str(inc.get("_id")) == incident_id or inc.get("_id") == incident_id:
-                        incident = inc
-                        break
-
-        # Save to memory as outcome
-        if incident:
-            try:
-                train_number = incident.get("train_number", "Unknown")
-                current_station = incident.get("current_station") or incident.get("location") or "Unknown"
-                station_code = get_station_code(current_station)
-                
-                time_str = "12:00-14:00"
-                try:
-                    ts_str = incident.get("timestamp")
-                    if ts_str:
-                        if isinstance(ts_str, datetime):
-                            dt = ts_str
-                        else:
-                            dt = datetime.fromisoformat(str(ts_str))
-                        h = dt.hour
-                        time_str = f"{h:02d}:00-{(h+2)%24:02d}:00"
-                except Exception:
-                    pass
-                
-                pattern = f"Train {train_number} is frequently delayed at {station_code} between {time_str}"
-                effectiveness = f"Human Override ({custom_decision}) executed"
-                escalations = f"{train_number} needed escalation 2x this week"
-                
-                from datetime import timezone
-                memory_item = {
-                    "train_number": train_number,
-                    "station_code": station_code,
-                    "pattern": pattern,
-                    "effectiveness": effectiveness,
-                    "escalations": escalations,
-                    "timestamp": datetime.now(timezone.utc).isoformat()
-                }
-                await self.save_memory(memory_item)
-            except Exception as e:
-                logger.error(f"Error creating/saving override memory: {e}")
+        await self._resolve_and_save_incident_memory(incident_id, custom_decision)
 
         # Update resolution_status to approved and reroute_plan to custom_decision
         if not self.use_fallback:

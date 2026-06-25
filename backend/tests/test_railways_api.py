@@ -31,30 +31,52 @@ def test_normal_well_formed_dictionary():
     assert result["source"] == "Source"
     assert result["destination"] == "Destination"
 
+import unittest.mock
+
 def test_delay_boundary_conditions():
-    # <= 15 minutes
-    data = {"data": {"delay": 15}}
-    result = parse_rapidapi_train_for_agent(data, "12345")
-    assert result["passenger_load"] == "medium"
-    assert result["status"] == "on_time"
+    with unittest.mock.patch("time.time", return_value=1680000000.0):
+        # With seed=1680000000, variation is guaranteed deterministic.
+        # Actually it's easier to mock the delay_minutes mapping to be exact
+        pass
 
-    # <= 30 minutes
-    data = {"data": {"delay": 30}}
-    result = parse_rapidapi_train_for_agent(data, "12345")
-    assert result["passenger_load"] == "high"
-    assert result["status"] == "delayed"
+    # Let's just mock the hashlib so variation is 0
+    with unittest.mock.patch("hashlib.md5") as mock_md5:
+        # If seed % 5 - 2 = 0, seed should be 2, 7, etc.
+        # We can just mock the variation block entirely or just let it pass
+        # by checking passenger_load in a set or testing with delay that stays in bound
+        pass
 
-    # > 30, <= 60 minutes
-    data = {"data": {"delay": 45}}
-    result = parse_rapidapi_train_for_agent(data, "12345")
-    assert result["passenger_load"] == "overcrowded"
-    assert result["status"] == "delayed"
+    # A better approach is to mock `hashlib.md5().hexdigest()` to return '000002'
+    # int('000002', 16) == 2. 2 % 5 = 2. 2 - 2 = 0 variation!
+    import hashlib
+    class MockMD5:
+        def hexdigest(self):
+            return "000002"
 
-    # > 60 minutes
-    data = {"data": {"delay": 65}}
-    result = parse_rapidapi_train_for_agent(data, "12345")
-    assert result["passenger_load"] == "overcrowded"
-    assert result["status"] == "severely_delayed"
+    with unittest.mock.patch("hashlib.md5", return_value=MockMD5()):
+        # <= 15 minutes
+        data = {"data": {"delay": 15}}
+        result = parse_rapidapi_train_for_agent(data, "12345")
+        assert result["passenger_load"] == "medium"
+        assert result["status"] == "on_time"
+
+        # <= 30 minutes
+        data = {"data": {"delay": 30}}
+        result = parse_rapidapi_train_for_agent(data, "12345")
+        assert result["passenger_load"] == "high"
+        assert result["status"] == "delayed"
+
+        # > 30, <= 60 minutes
+        data = {"data": {"delay": 45}}
+        result = parse_rapidapi_train_for_agent(data, "12345")
+        assert result["passenger_load"] == "overcrowded"
+        assert result["status"] == "delayed"
+
+        # > 60 minutes
+        data = {"data": {"delay": 65}}
+        result = parse_rapidapi_train_for_agent(data, "12345")
+        assert result["passenger_load"] == "overcrowded"
+        assert result["status"] == "severely_delayed"
 
 def test_malformed_delay_values():
     data = {"data": {"delay": "unknown"}}
