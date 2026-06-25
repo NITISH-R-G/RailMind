@@ -298,13 +298,14 @@ class FallbackDB:
                 effectiveness = f"{reroute_plan} recovered avg 18 mins for {station_code} delays"
                 escalations = f"{train_number} needed escalation 2x this week"
                 
+                from datetime import timezone
                 memory_item = {
                     "train_number": train_number,
                     "station_code": station_code,
                     "pattern": pattern,
                     "effectiveness": effectiveness,
                     "escalations": escalations,
-                    "timestamp": datetime.utcnow().isoformat()
+                    "timestamp": datetime.now(timezone.utc).isoformat()
                 }
                 await self.save_memory(memory_item)
             except Exception as e:
@@ -386,13 +387,14 @@ class FallbackDB:
                 effectiveness = f"Human Override ({custom_decision}) executed"
                 escalations = f"{train_number} needed escalation 2x this week"
                 
+                from datetime import timezone
                 memory_item = {
                     "train_number": train_number,
                     "station_code": station_code,
                     "pattern": pattern,
                     "effectiveness": effectiveness,
                     "escalations": escalations,
-                    "timestamp": datetime.utcnow().isoformat()
+                    "timestamp": datetime.now(timezone.utc).isoformat()
                 }
                 await self.save_memory(memory_item)
             except Exception as e:
