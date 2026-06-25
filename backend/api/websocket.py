@@ -88,7 +88,7 @@ async def websocket_endpoint(websocket: WebSocket):
     """
     Handle live streaming of railway operations updates.
     """
-    from datetime import datetime
+    from datetime import datetime, timezone
     connected = await websocket_manager.connect(websocket)
     if not connected:
         return
@@ -97,7 +97,7 @@ async def websocket_endpoint(websocket: WebSocket):
             # Add ping-pong heartbeats natively
             data = await websocket.receive_text()
             if data == "PING" or data == "PING_TEST":
-                await websocket.send_json({"type": "pong", "timestamp": datetime.utcnow().isoformat()})
+                await websocket.send_json({"type": "pong", "timestamp": datetime.now(timezone.utc).isoformat()})
             else:
                 await websocket.send_json({
                     "type": "echo",

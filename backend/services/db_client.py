@@ -125,8 +125,8 @@ class FallbackDB:
                 # Create the timestamp_window string (e.g., stripping minutes beyond a 5 min window)
                 # For simplicity and strict idempotency, we format to YYYY-MM-DDTHH:MM where MM is grouped
                 # or just directly use the timestamp but chunked to the nearest 5 minutes
-                from datetime import datetime
-                ts_str = doc.get("timestamp", datetime.utcnow().isoformat())
+                from datetime import datetime, timezone
+                ts_str = doc.get("timestamp", datetime.now(timezone.utc).isoformat())
                 try:
                     dt = datetime.fromisoformat(str(ts_str))
                     # Round down to nearest 5 minutes
