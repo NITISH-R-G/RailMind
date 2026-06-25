@@ -1118,18 +1118,6 @@ async def alert_node(state: AgentState) -> AgentState:
         await log_agent("alert_node", f"[RAILMIND] [ERROR] Alert node failed: {e}")
     return {}
 
-async def save_incident_if_not_duplicate(incident):
-    # Check last 5 minutes for same train number
-    duplicate = await db_client.has_recent_incident(incident["train_number"], minutes=5)
-    
-    if duplicate:
-        print(f"[RAILMIND] Skipping duplicate incident for train {incident['train_number']} (last logged in the last 5 minutes)")
-        return False
-    
-    await db_client.insert_incident(incident)
-    print(f"[RAILMIND] New incident saved: {incident['incident_title']}")
-    return True
-
 async def report_node(state: AgentState) -> AgentState:
     try:
         await log_agent("report_node", "[RAILMIND] Broadcasting operations report...")
@@ -1254,8 +1242,8 @@ async def report_node(state: AgentState) -> AgentState:
             "prediction": worst_case,
             "memory_used": state.get("memory_used")
         }
-        # Check for duplicates in last 5 minutes before saving (ISSUE 2)
-        saved = await save_incident_if_not_duplicate(incident_report)
+        # Let the DB engine handle idempotency via the timestamp_window unique compound index
+        saved = await db_client.insert_incident(incident_report)
         if saved:
             # Broadcast via WebSocket
             try:
@@ -1267,8 +1255,6 @@ async def report_node(state: AgentState) -> AgentState:
                 logger.error(f"Failed to broadcast incident update: {e}")
 
             await log_agent("LOGGED", f"Incident #RM-{incident_id[:3].upper()} saved to database")
-        else:
-            await log_agent("report_node", f"[RAILMIND] Duplicate incident check: train {train_number} has an active report in the last 5 minutes. Skipping DB insertion and broadcast.")
 
         # Mark this train as recently processed in state
         processed_trains = state.get("processed_trains", [])

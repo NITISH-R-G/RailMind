@@ -1,7 +1,31 @@
+import asyncio
 import httpx # type: ignore
 import os
+import time
 from datetime import datetime
 from dotenv import load_dotenv
+
+class TokenBucketRateLimiter:
+    def __init__(self, capacity: int, fill_rate: float):
+        self.capacity = capacity
+        self.fill_rate = fill_rate
+        self.tokens = capacity
+        self.last_fill = time.time()
+        self._lock = asyncio.Lock()
+
+    async def consume(self, tokens: int = 1):
+        async with self._lock:
+            now = time.time()
+            elapsed = now - self.last_fill
+            self.tokens = min(self.capacity, self.tokens + elapsed * self.fill_rate)
+            self.last_fill = now
+
+            if self.tokens < tokens:
+                raise ValueError(f"Rate limit exceeded. Requested {tokens}, but only {int(self.tokens)} available.")
+
+            self.tokens -= tokens
+
+rate_limiter = TokenBucketRateLimiter(capacity=5, fill_rate=5.0)
 
 # Ensure env variables are loaded
 env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
@@ -904,6 +928,9 @@ def parse_ntes_train_for_agent(data: dict, train_number: str) -> dict:
     }
 
 async def _get_live_train_status_impl(train_number: str) -> dict:
+    # Fail-fast pattern: raises ValueError if token bucket is exhausted
+    await rate_limiter.consume(1)
+
     if not train_number.isdigit():
         db_data = await get_db_realtime_data(train_number)
         if db_data:
