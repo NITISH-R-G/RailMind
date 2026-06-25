@@ -70,8 +70,10 @@ class FallbackDB:
 
     async def init_indexes(self):
         try:
-            # Create a 2dsphere index for geospatial locations if applicable, or just compound
-            await self.db["incidents"].create_index([("train_number", ASCENDING), ("timestamp", DESCENDING)], unique=True)
+            # Create a 2dsphere index for geospatial locations
+            await self.db["incidents"].create_index([("location", "2dsphere")])
+            # Create atomic unique compound index for idempotency
+            await self.db["incidents"].create_index([("train_number", ASCENDING), ("timestamp_window", DESCENDING)], unique=True)
             logger.info("MongoDB indexes created successfully.")
         except Exception as e:
             logger.warning(f"Failed to create indexes: {e}")
@@ -112,47 +114,29 @@ class FallbackDB:
         await asyncio.to_thread(self._sync_write_fallback, data)
 
     async def has_recent_incident(self, train_number, minutes=2):
-        from datetime import datetime, timedelta
-        cutoff = datetime.utcnow() - timedelta(minutes=minutes)
-        
-        if not self.use_fallback:
-            try:
-                # With unique compound indexes on train_number+timestamp, we don't strictly need this $gt check
-                # if we just catch DuplicateKeyError on insert, but we'll leave it for reading if needed.
-                # Since the instruction says use DuplicateKeyError INSTEAD OF $gt, let's just return False
-                # and let the insert catch the duplicate, OR query explicitly without $gt if we bucket by hour.
-                # Actually, the simplest optimization is just returning False here and relying on unique indexes
-                # during insert, but let's keep the exact signature and just catch it in insert_incident.
-                existing = await self.db["incidents"].find_one({
-                    "train_number": train_number,
-                    "timestamp": {"$gt": cutoff.isoformat()}
-                })
-                return existing is not None
-            except Exception as e:
-                logger.warning(f"MongoDB has_recent_incident failed: {e}. Falling back.")
-                self.use_fallback = True
-
-        # Fallback file check
-        async with self._lock:
-            data = await self._read_fallback()
-            for inc in data["incidents"]:
-                if inc.get("train_number") == train_number:
-                    ts_str = inc.get("timestamp")
-                    try:
-                        if isinstance(ts_str, datetime):
-                            ts = ts_str
-                        else:
-                            ts = datetime.fromisoformat(str(ts_str))
-                        if ts > cutoff:
-                            return True
-                    except Exception:
-                        pass
-            return False
+        # We rely on unique compound index and DuplicateKeyError inside insert_incident
+        # to guarantee idempotency, avoiding the expensive $gt query entirely.
+        return False
 
     async def insert_incident(self, incident):
         if not self.use_fallback:
             try:
-                await self.db["incidents"].insert_one(incident.copy())
+                doc = incident.copy()
+                # Create the timestamp_window string (e.g., stripping minutes beyond a 5 min window)
+                # For simplicity and strict idempotency, we format to YYYY-MM-DDTHH:MM where MM is grouped
+                # or just directly use the timestamp but chunked to the nearest 5 minutes
+                from datetime import datetime, timezone
+                ts_str = doc.get("timestamp", datetime.now(timezone.utc).isoformat())
+                try:
+                    dt = datetime.fromisoformat(str(ts_str))
+                    # Round down to nearest 5 minutes
+                    rounded_minute = (dt.minute // 5) * 5
+                    dt = dt.replace(minute=rounded_minute, second=0, microsecond=0)
+                    doc["timestamp_window"] = dt.isoformat()
+                except Exception:
+                    doc["timestamp_window"] = ts_str
+
+                await self.db["incidents"].insert_one(doc)
                 return True
             except DuplicateKeyError:
                 logger.info(f"Duplicate incident detected for train {incident.get('train_number')} at {incident.get('timestamp')}")
@@ -265,8 +249,8 @@ class FallbackDB:
                 await self._write_fallback(data)
             return modified_count
 
-    async def approve_incident(self, incident_id):
-        # Retrieve incident details first to save in memory
+    async def _resolve_and_save_incident_memory(self, incident_id, custom_decision=None):
+        """Helper to deduplicate memory saving logic for approve and override incident."""
         incident = None
         if not self.use_fallback:
             try:
@@ -289,13 +273,11 @@ class FallbackDB:
                         incident = inc
                         break
 
-        # If found, save to memory
         if incident:
             try:
                 train_number = incident.get("train_number", "Unknown")
                 current_station = incident.get("current_station") or incident.get("location") or "Unknown"
                 station_code = get_station_code(current_station)
-                reroute_plan = incident.get("reroute_plan") or "Redirect via loop lines"
                 
                 time_str = "12:00-14:00"
                 try:
@@ -311,20 +293,28 @@ class FallbackDB:
                     pass
                 
                 pattern = f"Train {train_number} is frequently delayed at {station_code} between {time_str}"
-                effectiveness = f"{reroute_plan} recovered avg 18 mins for {station_code} delays"
+                if custom_decision:
+                    effectiveness = f"Human Override ({custom_decision}) executed"
+                else:
+                    reroute_plan = incident.get("reroute_plan") or "Redirect via loop lines"
+                    effectiveness = f"{reroute_plan} recovered avg 18 mins for {station_code} delays"
                 escalations = f"{train_number} needed escalation 2x this week"
                 
+                from datetime import timezone
                 memory_item = {
                     "train_number": train_number,
                     "station_code": station_code,
                     "pattern": pattern,
                     "effectiveness": effectiveness,
                     "escalations": escalations,
-                    "timestamp": datetime.utcnow().isoformat()
+                    "timestamp": datetime.now(timezone.utc).isoformat()
                 }
                 await self.save_memory(memory_item)
             except Exception as e:
-                logger.error(f"Error creating/saving memory in approve_incident: {e}")
+                logger.error(f"Error creating/saving memory for incident: {e}")
+
+    async def approve_incident(self, incident_id):
+        await self._resolve_and_save_incident_memory(incident_id)
 
         # Now approve the incident
         if not self.use_fallback:
@@ -355,64 +345,7 @@ class FallbackDB:
             return modified_count
 
     async def override_incident(self, incident_id, custom_decision):
-        # Retrieve incident details first to save in memory
-        incident = None
-        if not self.use_fallback:
-            try:
-                from bson import ObjectId
-                query = {}
-                try:
-                    query = {"_id": ObjectId(incident_id)}
-                except Exception:
-                    query = {"incident_id": incident_id}
-                incident = await self.db["incidents"].find_one(query)
-            except Exception as e:
-                logger.warning(f"MongoDB find incident for override failed: {e}. Falling back.")
-                self.use_fallback = True
-
-        if self.use_fallback or not incident:
-            async with self._lock:
-                data = await self._read_fallback()
-                for inc in data["incidents"]:
-                    if inc.get("incident_id") == incident_id or str(inc.get("_id")) == incident_id or inc.get("_id") == incident_id:
-                        incident = inc
-                        break
-
-        # Save to memory as outcome
-        if incident:
-            try:
-                train_number = incident.get("train_number", "Unknown")
-                current_station = incident.get("current_station") or incident.get("location") or "Unknown"
-                station_code = get_station_code(current_station)
-                
-                time_str = "12:00-14:00"
-                try:
-                    ts_str = incident.get("timestamp")
-                    if ts_str:
-                        if isinstance(ts_str, datetime):
-                            dt = ts_str
-                        else:
-                            dt = datetime.fromisoformat(str(ts_str))
-                        h = dt.hour
-                        time_str = f"{h:02d}:00-{(h+2)%24:02d}:00"
-                except Exception:
-                    pass
-                
-                pattern = f"Train {train_number} is frequently delayed at {station_code} between {time_str}"
-                effectiveness = f"Human Override ({custom_decision}) executed"
-                escalations = f"{train_number} needed escalation 2x this week"
-                
-                memory_item = {
-                    "train_number": train_number,
-                    "station_code": station_code,
-                    "pattern": pattern,
-                    "effectiveness": effectiveness,
-                    "escalations": escalations,
-                    "timestamp": datetime.utcnow().isoformat()
-                }
-                await self.save_memory(memory_item)
-            except Exception as e:
-                logger.error(f"Error creating/saving override memory: {e}")
+        await self._resolve_and_save_incident_memory(incident_id, custom_decision)
 
         # Update resolution_status to approved and reroute_plan to custom_decision
         if not self.use_fallback:

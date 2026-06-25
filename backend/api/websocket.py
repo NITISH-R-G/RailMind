@@ -47,20 +47,11 @@ class ConnectionManager:
             self.active_connections.remove(websocket)
 
     async def broadcast(self, message: str):
-        # Publish to Redis instead of sending directly to active_connections
+        # Publish to Redis exclusively
         try:
             await self.redis.publish(self.channel, message)
         except Exception as e:
-            logger.error(f"Error publishing to Redis: {e}. Falling back to direct connection broadcasting.")
-            failed_connections = []
-            for connection in self.active_connections:
-                try:
-                    await connection.send_text(message)
-                except Exception as ex:
-                    logger.error(f"Error sending directly to client: {ex}")
-                    failed_connections.append(connection)
-            for connection in failed_connections:
-                self.disconnect(connection)
+            logger.error(f"Error publishing to Redis: {e}")
 
     async def _listen_to_redis(self):
         while True:
@@ -97,15 +88,16 @@ async def websocket_endpoint(websocket: WebSocket):
     """
     Handle live streaming of railway operations updates.
     """
+    from datetime import datetime, timezone
     connected = await websocket_manager.connect(websocket)
     if not connected:
         return
     try:
         while True:
-            # Add ping-pong heartbeats
+            # Add ping-pong heartbeats natively
             data = await websocket.receive_text()
             if data == "PING" or data == "PING_TEST":
-                await websocket.send_json({"type": "echo", "received": data})
+                await websocket.send_json({"type": "pong", "timestamp": datetime.now(timezone.utc).isoformat()})
             else:
                 await websocket.send_json({
                     "type": "echo",
