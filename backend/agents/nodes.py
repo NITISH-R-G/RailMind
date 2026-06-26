@@ -62,11 +62,9 @@ async def evaluate_previous_action(state: AgentState) -> AgentState:
         
         # Pre-ingest live train status if raw_train_data is empty (since this node runs first)
         if not state.get("raw_train_data"):
-            train_numbers = [
-                "12301", "12951", "12001", "12259", "12565",
-                "11057", "12627", "12625", "12621", "12615",
-                "12309", "12721", "12229", "12311", "12641"
-            ]
+            train_numbers = state.get("target_trains")
+            if not train_numbers:
+                train_numbers = ["12301", "12951", "12001", "12259", "12565", "11057", "12627", "12625", "12621", "12615", "12309", "12721", "12229", "12311", "12641"]
             import time
             start_time = time.time()
             client = railways_client
@@ -161,12 +159,7 @@ async def ingest_node(state: AgentState) -> AgentState:
         else:
             train_numbers = state.get("target_trains")
             if not train_numbers:
-                train_numbers = [
-                    "12301", "12951", "12001", "12259", "12565",
-                    "11057", "12627", "12625", "12621", "12615",
-                    "12309", "12721", "12229", "12311", "12641",
-                    "12438", "ICE"
-                ]
+                train_numbers = ["12301", "12951", "12001", "12259", "12565", "11057", "12627", "12625", "12621", "12615", "12309", "12721", "12229", "12311", "12641"]
             
             import time
             start_time = time.time()
@@ -1230,6 +1223,8 @@ async def report_node(state: AgentState) -> AgentState:
         
         incident_report = {
             "incident_id": incident_id,
+            "timestamp_window": datetime.utcnow().strftime("%Y-%m-%dT%H"),
+            "train_location": {"type": "Point", "coordinates": [anomaly.get("lng", 78.9629), anomaly.get("lat", 20.5937)]},
             "loop_created": state.get("loop_count", 0),
             "timestamp": datetime.utcnow().isoformat(),
             "train_number": train_number,
