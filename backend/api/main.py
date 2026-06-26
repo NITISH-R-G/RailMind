@@ -78,63 +78,11 @@ latest_agent_state = {
 }
 
 
-async def run_agent_loop_fallback():
-    from ..agents.graph import railmind_graph
-    from ..agents.state import AgentState
-    import uuid
-    train_numbers = [
-        "12301", "12951", "12001", "12259", "12565",
-        "11057", "12627", "12625", "12621", "12615",
-        "12309", "12721", "12229", "12311", "12641"
-    ]
-    processed_trains = []
-    
-    # Wait a few seconds for startup to settle
-    await asyncio.sleep(5)
-    
-    while True:
-        try:
-            print("[RAILMIND] Local background agent loop run starting...")
-            initial_state = AgentState(
-                raw_train_data=[],
-                anomalies=[],
-                claude_reasoning="",
-                reroute_plan=None,
-                department_tasks=[],
-                sms_alerts_sent=[],
-                incident_report=None,
-                loop_count=0,
-                should_continue=False,
-                last_api_call="Never",
-                railways_latency_ms=0,
-                ai_latency_ms=0,
-                processed_trains=processed_trains,
-                target_trains=train_numbers
-            )
-            thread_id = f"local_bg_{uuid.uuid4().hex[:8]}"
-            config = {"configurable": {"thread_id": thread_id}, "recursion_limit": 20}
-            result = await railmind_graph.ainvoke(initial_state, config)
-            if result:
-                processed_trains = result.get("processed_trains", [])
-                latest_agent_state.update({
-                    "raw_train_data": result.get("raw_train_data", []),
-                    "anomalies": result.get("anomalies", []),
-                    "claude_reasoning": result.get("claude_reasoning", ""),
-                    "reroute_plan": result.get("reroute_plan"),
-                    "department_tasks": result.get("department_tasks", []),
-                    "sms_alerts_sent": result.get("sms_alerts_sent", []),
-                    "incident_report": result.get("incident_report"),
-                    "loop_count": result.get("loop_count", 0),
-                    "should_continue": result.get("should_continue", False),
-                    "last_api_call": result.get("last_api_call", "Never"),
-                    "railways_latency_ms": result.get("railways_latency_ms", 0),
-                    "ai_latency_ms": result.get("ai_latency_ms", 0),
-                    "processed_trains": processed_trains
-                })
-            print("[RAILMIND] Local background agent loop run completed.")
-        except Exception as e:
-            print(f"[RAILMIND] Local background agent loop failed: {e}")
-        await asyncio.sleep(60)
+
+from arq import create_pool
+from arq.connections import RedisSettings
+
+redis_pool = None
 
 @app.on_event("startup")
 async def startup_event():
@@ -152,8 +100,15 @@ async def startup_event():
     except Exception as e:
         print(f"[RAILMIND] MongoDB connection/cleanup failed: {e}")
 
-    # Run the agent workflow loop asynchronously in the background on API startup
-    asyncio.create_task(run_agent_loop_fallback())
+    # Initialize ARQ Redis Pool
+    global redis_pool
+    try:
+        redis_settings = RedisSettings(host=os.getenv("REDIS_HOST", "localhost"), port=6379)
+        redis_pool = await create_pool(redis_settings)
+        print("[RAILMIND] ARQ Redis Pool connected [OK]")
+    except Exception as e:
+        print(f"[RAILMIND] ARQ Redis Pool connection failed: {e}")
+
 
 # Include general REST routers
 app.include_router(router, prefix="/api")
@@ -307,57 +262,21 @@ async def get_telemetry_api():
     }
 
 async def run_single_agent_iteration():
-    from ..agents.graph import railmind_graph
-    from ..agents.state import AgentState
-    import uuid
     train_numbers = [
         "12301", "12951", "12001", "12259", "12565",
         "11057", "12627", "12625", "12621", "12615",
         "12309", "12721", "12229", "12311", "12641"
     ]
-    global latest_agent_state
-    processed_trains = latest_agent_state.get("processed_trains", [])
-    try:
-        print("[RAILMIND] Immediate agent loop iteration starting via simulation trigger...")
-        initial_state = AgentState(
-            raw_train_data=[],
-            anomalies=[],
-            claude_reasoning="",
-            reroute_plan=None,
-            department_tasks=[],
-            sms_alerts_sent=[],
-            incident_report=None,
-            loop_count=0,
-            should_continue=False,
-            last_api_call="Never",
-            railways_latency_ms=0,
-            ai_latency_ms=0,
-            processed_trains=processed_trains,
-            target_trains=train_numbers
-        )
-        thread_id = f"sim_trigger_{uuid.uuid4().hex[:8]}"
-        config = {"configurable": {"thread_id": thread_id}, "recursion_limit": 20}
-        result = await railmind_graph.ainvoke(initial_state, config)
-        if result:
-            processed_trains = result.get("processed_trains", [])
-            latest_agent_state.update({
-                "raw_train_data": result.get("raw_train_data", []),
-                "anomalies": result.get("anomalies", []),
-                "claude_reasoning": result.get("claude_reasoning", ""),
-                "reroute_plan": result.get("reroute_plan"),
-                "department_tasks": result.get("department_tasks", []),
-                "sms_alerts_sent": result.get("sms_alerts_sent", []),
-                "incident_report": result.get("incident_report"),
-                "loop_count": result.get("loop_count", 0),
-                "should_continue": result.get("should_continue", False),
-                "last_api_call": result.get("last_api_call", "Never"),
-                "railways_latency_ms": result.get("railways_latency_ms", 0),
-                "ai_latency_ms": result.get("ai_latency_ms", 0),
-                "processed_trains": processed_trains
-            })
-        print("[RAILMIND] Immediate agent loop iteration completed.")
-    except Exception as e:
-        print(f"[RAILMIND] Immediate agent loop iteration failed: {e}")
+    global redis_pool
+    if redis_pool:
+        try:
+            print("[RAILMIND] Enqueueing agent loop iteration via ARQ...")
+            await redis_pool.enqueue_job("run_agent_graph", train_numbers)
+        except Exception as e:
+            print(f"[RAILMIND] Failed to enqueue job: {e}")
+    else:
+        print("[RAILMIND] ARQ Redis Pool not initialized. Cannot run iteration.")
+
 
 @app.post("/api/simulate-anomaly")
 async def simulate_anomaly_api(data: dict):
