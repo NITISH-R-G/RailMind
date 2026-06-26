@@ -11,6 +11,26 @@ logger = logging.getLogger(__name__)
 
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
 
+
+class SlidingWindowRateLimiter:
+    def __init__(self, capacity: int, window_sec: float):
+        self.capacity = capacity
+        self.window = window_sec
+        self.timestamps = []
+        self._lock = asyncio.Lock()
+
+    async def consume(self) -> bool:
+        async with self._lock:
+            now = asyncio.get_event_loop().time()
+            self.timestamps = [t for t in self.timestamps if now - t <= self.window]
+            if len(self.timestamps) < self.capacity:
+                self.timestamps.append(now)
+                return True
+            return False
+
+rate_limiter = SlidingWindowRateLimiter(capacity=100, window_sec=1.0)
+
+
 class ConnectionManager:
     """
     Manages active WebSocket connections and broadcasting via Redis Pub/Sub backplane.
@@ -102,13 +122,16 @@ async def websocket_endpoint(websocket: WebSocket):
         return
     try:
         while True:
-            # Add ping-pong heartbeats
+                        # Add ping-pong heartbeats
             data = await websocket.receive_text()
+            if not await rate_limiter.consume():
+                await websocket.send_json({"type": "error", "message": "Rate limit exceeded"})
+                continue
+
             if data == "PING" or data == "PING_TEST":
                 await websocket.send_json({"type": "PONG"})
             elif data == "RECOVER_STATE":
                 await websocket.send_json({"type": "STATE_RECOVERY", "status": "sync_complete", "timestamp": "current_time"})
-
             else:
                 await websocket.send_json({
                     "type": "echo",

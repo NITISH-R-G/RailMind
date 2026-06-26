@@ -70,6 +70,7 @@ class FallbackDB:
 
     async def init_indexes(self):
         try:
+            # Create a 2dsphere index for geospatial locations if applicable, or just compound
                         # Create a 2dsphere index for geospatial locations if applicable, or just compound
             await self.db["incidents"].create_index([("train_location", "2dsphere")])
             await self.db["incidents"].create_index([("train_number", ASCENDING), ("timestamp_window", ASCENDING)], unique=True)
