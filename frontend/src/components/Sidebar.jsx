@@ -32,8 +32,8 @@ export default function Sidebar({ activeTab = 'Dashboard', setActiveTab }) {
       <div>
         {/* Header */}
         <div style={{ padding: '0 24px 24px 24px', borderBottom: '1px solid #1a2433' }}>
-          <h2 className="palantir-mono" style={{ fontSize: '15px', fontWeight: 600, color: '#e2e8f0', letterSpacing: '1px' }}>SYS // ALPHA</h2>
-          <span className="palantir-mono" style={{ fontSize: '10px', color: '#00f0ff', fontWeight: 500 }}>Monitoring: Active</span>
+          <h2 className="tactical-mono" style={{ fontSize: '15px', fontWeight: 600, color: '#e2e8f0', letterSpacing: '1px' }}>SYS // ALPHA</h2>
+          <span className="tactical-mono" style={{ fontSize: '10px', color: '#00f0ff', fontWeight: 500 }}>Monitoring: Active</span>
         </div>
 
         {/* Navigation */}
@@ -45,7 +45,7 @@ export default function Sidebar({ activeTab = 'Dashboard', setActiveTab }) {
               <button
                 key={item.id}
                 onClick={() => setActiveTab && setActiveTab(item.id)}
-                className="palantir-mono"
+                className="tactical-mono"
                 style={{
                   display: 'flex',
                   alignItems: 'center',
@@ -93,7 +93,7 @@ export default function Sidebar({ activeTab = 'Dashboard', setActiveTab }) {
             <button
               key={item.id}
               onClick={() => setActiveTab && setActiveTab(item.id)}
-              className="palantir-mono"
+              className="tactical-mono"
               style={{
                 display: 'flex',
                 alignItems: 'center',
