@@ -1,7 +1,7 @@
 from typing import TypedDict, List, Optional, Annotated
 import operator
 
-def append_to_list(a: Optional[List], b: Optional[List]) -> List:
+def add_with_clear(a: Optional[List], b: Optional[List]) -> List:
     if a is None:
         a = []
     if b is None:
@@ -11,7 +11,7 @@ def append_to_list(a: Optional[List], b: Optional[List]) -> List:
     if b and b[0] == "CLEAR":
         return []
 
-    return a + b
+    return operator.add(a, b)
 
 class TrainAnomaly(TypedDict):
     train_number: str
@@ -30,11 +30,11 @@ class DepartmentTask(TypedDict):
 
 class AgentState(TypedDict):
     raw_train_data: List[dict]
-    anomalies: Annotated[List[TrainAnomaly], append_to_list]
+    anomalies: Annotated[List[TrainAnomaly], add_with_clear]
     claude_reasoning: str
     reroute_plan: Optional[str]
-    department_tasks: Annotated[List[DepartmentTask], operator.add]
-    sms_alerts_sent: Annotated[List[str], append_to_list]
+    department_tasks: Annotated[List[DepartmentTask], add_with_clear]
+    sms_alerts_sent: Annotated[List[str], add_with_clear]
     incident_report: Optional[str]
     loop_count: int
     should_continue: bool
@@ -43,11 +43,11 @@ class AgentState(TypedDict):
     ai_latency_ms: int
     processed_trains: List[str]
     target_trains: List[str]
-    errors: Annotated[List[str], append_to_list]
+    errors: Annotated[List[str], add_with_clear]
     next_node: str
     last_node_executed: str
-    messages: Annotated[list, operator.add]
-    tools_used: Annotated[List[str], append_to_list]
+    messages: Annotated[list, add_with_clear]
+    tools_used: Annotated[List[str], add_with_clear]
     detour_route: List[str]
     perception: Optional[dict]
     decision: Optional[dict]
