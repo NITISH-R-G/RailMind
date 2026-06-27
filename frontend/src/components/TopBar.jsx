@@ -1,11 +1,15 @@
-/* eslint-disable */
 import React, { useState, useEffect } from 'react';
 import { Bell, Settings } from 'lucide-react';
+import { useStore } from '../store';
 
-export default function TopBar({ loopCount = 0, incidentCount = 0, wsStatus = 'connected', onNotificationsClick, onSettingsClick, onProfileClick, activeTab = 'Dashboard', onTabChange, liveFlash = false, cycleCountdown = 30 }) {
+export default function TopBar({ onNotificationsClick, onSettingsClick, onProfileClick, activeTab = 'Dashboard', onTabChange, liveFlash = false }) {
   const tabs = ['Rail Network', 'Sensor Data', 'Timetable', 'Fleet'];
-  // Keep tab mapping aligned with App.jsx
   const activeTopTab = ['Sensor Data', 'Timetable', 'Fleet'].includes(activeTab) ? activeTab : 'Rail Network';
+
+  const loopCount = useStore(state => state.telemetry.loopCount);
+  const incidentCount = useStore(state => state.incidents.length);
+  const wsStatus = useStore(state => state.wsStatus);
+  const cycleCountdown = useStore(state => state.telemetry.cycleCountdown);
   const isConnected = wsStatus === 'connected';
 
   return (
@@ -22,7 +26,7 @@ export default function TopBar({ loopCount = 0, incidentCount = 0, wsStatus = 'c
       {/* Left section: Logo & Nav tabs */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '32px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <span className="palantir-mono" style={{
+          <span className="tactical-mono" style={{
             fontSize: '18px',
             fontWeight: 700,
             color: '#e2e8f0', 
@@ -68,7 +72,7 @@ export default function TopBar({ loopCount = 0, incidentCount = 0, wsStatus = 'c
           <input 
             type="text" 
             placeholder="Search or Enter Command" 
-            className="palantir-mono"
+            className="tactical-mono"
             style={{
               backgroundColor: '#080a0d',
               border: '1px solid #1a2433',
@@ -113,7 +117,7 @@ export default function TopBar({ loopCount = 0, incidentCount = 0, wsStatus = 'c
                 borderRadius: '50%'
               }}
             ></span>
-            <span className="palantir-mono" style={{ 
+            <span className="tactical-mono" style={{
               fontSize: '11px', 
               fontWeight: 600, 
               color: isConnected ? '#00e676' : '#ff3366', 
@@ -127,24 +131,24 @@ export default function TopBar({ loopCount = 0, incidentCount = 0, wsStatus = 'c
 
           {/* LOOP COUNT */}
           <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px' }}>
-            <span className="palantir-mono" style={{ fontSize: '10px', fontWeight: 600, color: '#5c7080', letterSpacing: '0.5px' }}>Cycles:</span>
-            <span className="palantir-mono" style={{ fontSize: '13px', fontWeight: 700, color: '#00f0ff' }}>[{loopCount < 10 ? '0' + loopCount : loopCount}]</span>
+            <span className="tactical-mono" style={{ fontSize: '10px', fontWeight: 600, color: '#5c7080', letterSpacing: '0.5px' }}>Cycles:</span>
+            <span className="tactical-mono" style={{ fontSize: '13px', fontWeight: 700, color: '#00f0ff' }}>[{loopCount < 10 ? '0' + loopCount : loopCount}]</span>
           </div>
 
           <div style={{ width: '1px', height: '14px', backgroundColor: '#1a2433' }}></div>
 
           {/* INCIDENTS count */}
           <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px' }}>
-            <span className="palantir-mono" style={{ fontSize: '10px', fontWeight: 600, color: '#5c7080', letterSpacing: '0.5px' }}>Alerts:</span>
-            <span className="palantir-mono" style={{ fontSize: '13px', fontWeight: 700, color: '#ff3366' }}>[{incidentCount < 10 ? '0' + incidentCount : incidentCount}]</span>
+            <span className="tactical-mono" style={{ fontSize: '10px', fontWeight: 600, color: '#5c7080', letterSpacing: '0.5px' }}>Alerts:</span>
+            <span className="tactical-mono" style={{ fontSize: '13px', fontWeight: 700, color: '#ff3366' }}>[{incidentCount < 10 ? '0' + incidentCount : incidentCount}]</span>
           </div>
 
           <div style={{ width: '1px', height: '14px', backgroundColor: '#1a2433' }}></div>
 
           {/* Next agent cycle countdown */}
           <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px' }}>
-            <span className="palantir-mono" style={{ fontSize: '10px', fontWeight: 600, color: '#5c7080', letterSpacing: '0.5px' }}>NEXT CYCLE:</span>
-            <span className="palantir-mono" style={{ 
+            <span className="tactical-mono" style={{ fontSize: '10px', fontWeight: 600, color: '#5c7080', letterSpacing: '0.5px' }}>NEXT CYCLE:</span>
+            <span className="tactical-mono" style={{
               fontSize: '13px', 
               fontWeight: 700, 
               color: cycleCountdown <= 5 ? '#ff3366' : '#ffb300',

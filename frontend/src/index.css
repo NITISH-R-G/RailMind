@@ -1,22 +1,21 @@
-@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600;700&family=Share+Tech+Mono&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&family=SF+Pro+Display:wght@300;400;500;600;700&display=swap');
 @import "leaflet/dist/leaflet.css";
 
 :root {
-  --bg-main: #080a0d;
+  --bg-main: #0A0E17;
   --bg-panel: #0d1117;
-  --bg-card: #121820;
-  --bg-card-hover: #17202b;
-  --border-color: #1a2433;
-  --border-color-active: #3b82f6;
+  --bg-surface: #161F30;
+  --border-color: #26354A;
+  --border-active: #00FF66;
+
   --text-primary: #e2e8f0;
   --text-secondary: #8a9ba8;
   --text-muted: #5c7080;
-  --accent-color: #00f0ff;
   
-  --color-critical: #ff3366;
-  --color-warning: #ffb300;
-  --color-info: #00f0ff;
-  --color-resolved: #00e676;
+  --color-amber: #FFB000;
+  --color-green: #00FF66;
+  --color-crimson: #FF3333;
+  --color-accent: #00FF66;
 }
 
 * {
@@ -26,11 +25,11 @@
 }
 
 body {
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: 'JetBrains Mono', monospace;
   background-color: var(--bg-main);
   background-image: 
-    radial-gradient(rgba(0, 240, 255, 0.03) 1px, transparent 0),
-    radial-gradient(rgba(0, 240, 255, 0.02) 2px, transparent 0);
+    radial-gradient(rgba(38, 53, 74, 0.4) 1px, transparent 0),
+    radial-gradient(rgba(38, 53, 74, 0.2) 2px, transparent 0);
   background-size: 24px 24px, 48px 48px;
   background-position: 0 0, 12px 12px;
   color: var(--text-primary);
@@ -38,9 +37,13 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-/* Monospace Utility */
-.palantir-mono {
-  font-family: 'JetBrains Mono', 'Share Tech Mono', monospace !important;
+/* Typography Utility */
+.tactical-mono {
+  font-family: 'JetBrains Mono', monospace !important;
+}
+
+.tactical-sans {
+  font-family: 'SF Pro Display', -apple-system, sans-serif !important;
 }
 
 /* Scrollbar styling */
@@ -49,7 +52,7 @@ body {
   height: 4px;
 }
 ::-webkit-scrollbar-track {
-  background: var(--bg-panel);
+  background: var(--bg-main);
 }
 ::-webkit-scrollbar-thumb {
   background: var(--border-color);
@@ -59,36 +62,84 @@ body {
   background: var(--text-muted);
 }
 
-/* Pulse animation */
-@keyframes pulse-live {
-  0% {
-    transform: scale(0.95);
-    box-shadow: 0 0 0 0 rgba(0, 240, 255, 0.5);
-  }
-  70% {
-    transform: scale(1);
-    box-shadow: 0 0 0 8px rgba(0, 240, 255, 0);
-  }
-  100% {
-    transform: scale(0.95);
-    box-shadow: 0 0 0 0 rgba(0, 240, 255, 0);
-  }
+/* Pulse Animations */
+@keyframes pulse-amber {
+  0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(255, 176, 0, 0.5); }
+  70% { transform: scale(1); box-shadow: 0 0 0 8px rgba(255, 176, 0, 0); }
+  100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(255, 176, 0, 0); }
 }
 
-.pulse-dot-cyan {
+@keyframes pulse-green {
+  0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(0, 255, 102, 0.5); }
+  70% { transform: scale(1); box-shadow: 0 0 0 8px rgba(0, 255, 102, 0); }
+  100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(0, 255, 102, 0); }
+}
+
+@keyframes pulse-crimson {
+  0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(255, 51, 51, 0.5); }
+  70% { transform: scale(1); box-shadow: 0 0 0 8px rgba(255, 51, 51, 0); }
+  100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(255, 51, 51, 0); }
+}
+
+.pulse-dot-green {
   display: inline-block;
   width: 8px;
   height: 8px;
-  background-color: var(--accent-color);
+  background-color: var(--color-green);
   border-radius: 50%;
-  animation: pulse-live 2s infinite;
+  animation: pulse-green 2s infinite;
 }
 
-/* Leaflet dark tile custom style and custom map styles */
+.pulse-dot-amber {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  background-color: var(--color-amber);
+  border-radius: 50%;
+  animation: pulse-amber 2s infinite;
+}
+
+.pulse-dot-crimson {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  background-color: var(--color-crimson);
+  border-radius: 50%;
+  animation: pulse-crimson 2s infinite;
+}
+
+/* Tactical Panel Base Style */
+.bento-panel {
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.bento-header {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-color);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background-color: var(--bg-main);
+}
+
+.bento-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-primary);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+/* Leaflet dark tile custom style */
 .leaflet-container {
   width: 100%;
   height: 100%;
-  background-color: #080a0d !important;
+  background-color: var(--bg-main) !important;
 }
 
 .leaflet-control-zoom {
@@ -98,7 +149,7 @@ body {
 
 .leaflet-control-zoom-in,
 .leaflet-control-zoom-out {
-  background-color: var(--bg-panel) !important;
+  background-color: var(--bg-surface) !important;
   color: var(--text-primary) !important;
   border-bottom: 1px solid var(--border-color) !important;
   font-family: 'JetBrains Mono', monospace !important;
@@ -107,8 +158,8 @@ body {
 
 .leaflet-control-zoom-in:hover,
 .leaflet-control-zoom-out:hover {
-  background-color: var(--bg-card) !important;
-  color: var(--accent-color) !important;
+  background-color: var(--bg-main) !important;
+  color: var(--color-green) !important;
 }
 
 .leaflet-bar {
@@ -116,9 +167,8 @@ body {
   box-shadow: none !important;
 }
 
-/* Custom leaflet tooltip style */
 .leaflet-popup-content-wrapper {
-  background-color: var(--bg-card) !important;
+  background-color: var(--bg-surface) !important;
   color: var(--text-primary) !important;
   border: 1px solid var(--border-color) !important;
   border-radius: 0px !important;
@@ -132,7 +182,7 @@ body {
 }
 
 .leaflet-popup-tip {
-  background-color: var(--bg-card) !important;
+  background-color: var(--bg-surface) !important;
   border: 1px solid var(--border-color) !important;
   box-shadow: none !important;
 }
@@ -142,78 +192,10 @@ body {
   border: none !important;
 }
 
-/* Tactical Panel/Widget Border Styles */
-.terminal-panel {
-  background-color: var(--bg-panel);
-  border: 1px solid var(--border-color);
-  position: relative;
+@keyframes dashFlow {
+  from { stroke-dashoffset: 24; }
+  to   { stroke-dashoffset: 0; }
 }
-
-.terminal-panel::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 8px;
-  height: 2px;
-  background-color: var(--accent-color);
+.animated-dash-flow {
+  animation: dashFlow 1.5s linear infinite;
 }
-
-.terminal-panel::after {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 2px;
-  height: 8px;
-  background-color: var(--accent-color);
-}
-
-@keyframes flash-active {
-  0% {
-    transform: scale(1);
-    background-color: #00e676;
-    box-shadow: 0 0 0px #00e676;
-  }
-  50% {
-    transform: scale(1.6);
-    background-color: #00ff88;
-    box-shadow: 0 0 15px #00ff88;
-  }
-  100% {
-    transform: scale(1);
-    background-color: #00e676;
-    box-shadow: 0 0 0px #00e676;
-  }
-}
-
-.flash-active-trigger {
-  animation: flash-active 0.8s ease-in-out;
-}
-
-/* Agent Brain Column Pulses */
-@keyframes pulse-cyan {
-  0% { border-color: #1a2433; box-shadow: none; background-color: #121820; }
-  50% { border-color: #00f0ff; box-shadow: 0 0 12px rgba(0, 240, 255, 0.25); background-color: rgba(0, 240, 255, 0.05); }
-  100% { border-color: #1a2433; box-shadow: none; background-color: #121820; }
-}
-@keyframes pulse-yellow {
-  0% { border-color: #1a2433; box-shadow: none; background-color: #121820; }
-  50% { border-color: #ffb300; box-shadow: 0 0 12px rgba(255, 179, 0, 0.25); background-color: rgba(255, 179, 0, 0.05); }
-  100% { border-color: #1a2433; box-shadow: none; background-color: #121820; }
-}
-@keyframes pulse-green {
-  0% { border-color: #1a2433; box-shadow: none; background-color: #121820; }
-  50% { border-color: #00e676; box-shadow: 0 0 12px rgba(0, 230, 118, 0.25); background-color: rgba(0, 230, 118, 0.05); }
-  100% { border-color: #1a2433; box-shadow: none; background-color: #121820; }
-}
-.pulse-perceive {
-  animation: pulse-cyan 1.5s infinite ease-in-out;
-}
-.pulse-decide {
-  animation: pulse-yellow 1.5s infinite ease-in-out;
-}
-.pulse-act {
-  animation: pulse-green 1.5s infinite ease-in-out;
-}
-

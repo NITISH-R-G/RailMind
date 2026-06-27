@@ -1,6 +1,7 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import LiveMap from './LiveMap';
+import { useStore } from '../store';
 
 // Mock react-leaflet
 vi.mock('react-leaflet', () => {
@@ -9,24 +10,27 @@ vi.mock('react-leaflet', () => {
     TileLayer: () => <div data-testid="tile-layer" />,
     Marker: ({ children }) => <div data-testid="marker">{children}</div>,
     Popup: ({ children }) => <div data-testid="popup">{children}</div>,
-    ZoomControl: () => <div data-testid="zoom-control" />
+    ZoomControl: () => <div data-testid="zoom-control" />,
+    Polyline: () => <div data-testid="polyline" />
   };
 });
 
 describe('LiveMap Component', () => {
-  it('renders gracefully with empty train array (fallback logic)', () => {
-    render(<LiveMap trains={[]} />);
+  beforeEach(() => {
+    useStore.setState({ trains: [], incidents: [] });
+  });
 
-    // Fallback data is expected to show 3 markers
+  it('renders gracefully with empty train array (fallback logic)', () => {
+    render(<LiveMap />);
+
     const mapContainer = screen.getByTestId('map-container');
     expect(mapContainer).toBeInTheDocument();
 
     const markers = screen.getAllByTestId('marker');
-    expect(markers).toHaveLength(3); // 3 fallback trains
+    // Our refactored component falls back to 1 fallback train
+    expect(markers).toHaveLength(1);
 
-    expect(screen.getByText('Chennai Exp')).toBeInTheDocument();
-    expect(screen.getByText('Mumbai Rajdhani')).toBeInTheDocument();
-    expect(screen.getByText('Howrah Duronto')).toBeInTheDocument();
+    expect(screen.getByText('Howrah Rajdhani')).toBeInTheDocument();
   });
 
   it('renders with provided trains', () => {
@@ -46,7 +50,9 @@ describe('LiveMap Component', () => {
       }
     ];
 
-    render(<LiveMap trains={customTrains} />);
+    useStore.setState({ trains: customTrains });
+
+    render(<LiveMap />);
 
     const markers = screen.getAllByTestId('marker');
     expect(markers).toHaveLength(1);
