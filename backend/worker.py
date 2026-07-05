@@ -89,6 +89,22 @@ async def run_agent_graph(ctx, train_numbers: list):
         logger.error(f"Agent graph error in worker: {e}")
 
 # Provide the background poller function that enqueues jobs
+
+async def process_train_telemetry(ctx, telemetry_data: list):
+    logger.info(f"Processing telemetry batch of {len(telemetry_data)} items...")
+    try:
+        await rate_limiter.consume(1)
+    except ValueError as e:
+        logger.error(f"Rate limit exceeded: {e}")
+        raise Retry(defer=1)
+
+    try:
+        # In a real scenario, this would parse/validate and update DB.
+        # Here we just log for demonstration of the decoupled architecture.
+        logger.info(f"Successfully processed {len(telemetry_data)} telemetry chunks.")
+    except Exception as e:
+        logger.error(f"Error processing telemetry: {e}")
+
 async def poll_railways_api(ctx):
     """
     Periodic job that enqueue the run_agent_graph job.
@@ -103,7 +119,7 @@ async def poll_railways_api(ctx):
     await ctx["redis"].enqueue_job("run_agent_graph", train_numbers)
 
 class WorkerSettings:
-    functions = [run_agent_graph]
+    functions = [run_agent_graph, process_train_telemetry]
     cron_jobs = [
         # Run every minute
         worker.cron(poll_railways_api, minute=set(range(60)))
