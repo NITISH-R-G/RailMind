@@ -1119,16 +1119,14 @@ async def alert_node(state: AgentState) -> AgentState:
     return {}
 
 async def save_incident_if_not_duplicate(incident):
-    # Check last 5 minutes for same train number
-    duplicate = await db_client.has_recent_incident(incident["train_number"], minutes=5)
-    
-    if duplicate:
-        print(f"[RAILMIND] Skipping duplicate incident for train {incident['train_number']} (last logged in the last 5 minutes)")
-        return False
-    
-    await db_client.insert_incident(incident)
-    print(f"[RAILMIND] New incident saved: {incident['incident_title']}")
-    return True
+    # Relies on database layer idempotency (DuplicateKeyError on unique compound index)
+    # rather than doing an explicit read query check
+    saved = await db_client.insert_incident(incident)
+    if saved:
+        print(f"[RAILMIND] New incident saved: {incident['incident_title']}")
+    else:
+        print(f"[RAILMIND] Skipping duplicate incident for train {incident['train_number']}")
+    return saved
 
 async def report_node(state: AgentState) -> AgentState:
     try:
@@ -1230,8 +1228,15 @@ async def report_node(state: AgentState) -> AgentState:
         
         incident_report = {
             "incident_id": incident_id,
-            "loop_created": state.get("loop_count", 0),
+            "incident_title": f"Severity {severity.upper()} Deviation: Train {train_number}",
+            "train_number": train_number,
+            "train_name": train_name,
+            "severity": severity,
+            "location": current_station,
+            "delay_minutes": delay_minutes,
+            "status": "pending_review",
             "timestamp": datetime.utcnow().isoformat(),
+            "timestamp_window": (datetime.utcnow().minute // 5) * 5 + datetime.utcnow().hour * 60, # 5 min bucket
             "train_number": train_number,
             "train_name": train_name,
             "incident_title": cascade_title or f"{train_number} {train_name} delayed {delay_minutes}min at {current_station}",

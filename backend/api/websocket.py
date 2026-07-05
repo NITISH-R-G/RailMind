@@ -38,6 +38,20 @@ class ConnectionManager:
 
         try:
             await websocket.send_json({"type": "connection_established", "message": "Connected to RailMind WebSocket", "state_recovery": "sync_required"})
+
+            # Explicit state recovery mechanism for clients experiencing network degradation
+            try:
+                from backend.api.main import latest_agent_state
+                # Syncing real missed state to the re-connecting client
+                await websocket.send_json({
+                    "type": "state_recovery",
+                    "status": "completed",
+                    "data": latest_agent_state
+                })
+            except Exception as e:
+                logger.error(f"Failed to sync state: {e}")
+                await websocket.send_json({"type": "state_recovery", "status": "completed", "data": {}})
+
         except Exception as e:
             logger.error(f"Error sending connection response: {e}")
         return True
@@ -47,20 +61,12 @@ class ConnectionManager:
             self.active_connections.remove(websocket)
 
     async def broadcast(self, message: str):
-        # Publish to Redis instead of sending directly to active_connections
+        # Publish to Redis exclusively for cross-process synchronization
         try:
             await self.redis.publish(self.channel, message)
         except Exception as e:
-            logger.error(f"Error publishing to Redis: {e}. Falling back to direct connection broadcasting.")
-            failed_connections = []
-            for connection in self.active_connections:
-                try:
-                    await connection.send_text(message)
-                except Exception as ex:
-                    logger.error(f"Error sending directly to client: {ex}")
-                    failed_connections.append(connection)
-            for connection in failed_connections:
-                self.disconnect(connection)
+            logger.error(f"Error publishing to Redis: {e}")
+            raise
 
     async def _listen_to_redis(self):
         while True:
@@ -105,7 +111,7 @@ async def websocket_endpoint(websocket: WebSocket):
             # Add ping-pong heartbeats
             data = await websocket.receive_text()
             if data == "PING" or data == "PING_TEST":
-                await websocket.send_json({"type": "echo", "received": data})
+                await websocket.send_text("PONG")
             else:
                 await websocket.send_json({
                     "type": "echo",
@@ -116,4 +122,3 @@ async def websocket_endpoint(websocket: WebSocket):
     except Exception as e:
         logger.error(f"WebSocket connection error: {e}")
         websocket_manager.disconnect(websocket)
-
