@@ -1,3 +1,4 @@
+from ..config import settings
 import httpx # type: ignore
 import os
 from datetime import datetime
@@ -7,9 +8,9 @@ from dotenv import load_dotenv
 env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
 load_dotenv(dotenv_path=env_path)
 
-RAILWAYS_API_KEY = os.getenv("RAILWAYS_API_KEY")
-RAPIDAPI_KEY = os.getenv("RAPIDAPI_KEY")
-RAPIDAPI_HOST = os.getenv("RAPIDAPI_HOST", "irctc1.p.rapidapi.com")
+RAILWAYS_API_KEY = settings.RAILWAYS_API_KEY
+RAPIDAPI_KEY = settings.RAPIDAPI_KEY
+RAPIDAPI_HOST = settings.RAPIDAPI_HOST
 
 BASE_URL = "http://indianrailapi.com/api/v2"
 
@@ -1102,7 +1103,7 @@ def parse_train_for_agent(data: dict, train_number: str) -> dict:
 
 class RailwaysAPIClient:
     def __init__(self, api_key: str = None):
-        self.api_key = api_key or os.getenv("RAILWAYS_API_KEY")
+        self.api_key = api_key or settings.RAILWAYS_API_KEY
 
     async def get_live_train_status(self, train_number: str) -> dict:
         return await get_live_train_status(train_number)

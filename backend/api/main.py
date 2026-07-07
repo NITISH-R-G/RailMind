@@ -1,3 +1,4 @@
+from ..config import settings
 import asyncio
 import os
 import uvicorn
@@ -17,9 +18,9 @@ from ..services.db_client import db_client
 security = HTTPBasic()
 
 def verify_admin(credentials: HTTPBasicCredentials = Depends(security)):
-    admin_user = os.getenv("ADMIN_USERNAME", "admin")
-    admin_pass = os.getenv("ADMIN_PASSWORD")
-    if not admin_pass:
+    admin_user = settings.ADMIN_USERNAME
+    admin_pass = settings.ADMIN_PASSWORD
+    if not settings.ADMIN_PASSWORD:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Admin password not configured in environment.",
@@ -40,6 +41,8 @@ from .websocket import websocket_endpoint, websocket_manager # type: ignore
 from ..agents.graph import railmind_graph # type: ignore
 from ..agents.state import AgentState # type: ignore
 from ..services.railways_api import RailwaysAPIClient
+
+from prometheus_client import make_asgi_app
 
 app = FastAPI(
     title="RailMind Operations API",
@@ -158,6 +161,11 @@ async def startup_event():
 # Include general REST routers
 app.include_router(router, prefix="/api")
 
+# Mount Prometheus metrics
+metrics_app = make_asgi_app()
+app.mount("/metrics", metrics_app)
+
+
 # Mounting direct WebSocket handler
 @app.websocket("/ws")
 async def ws_endpoint(websocket: WebSocket):
@@ -260,14 +268,14 @@ async def get_system_status():
         pass
 
     # Railways API
-    railways_api_key = os.getenv("RAILWAYS_API_KEY", "")
-    rapidapi_key = os.getenv("RAPIDAPI_KEY", "")
+    railways_api_key = settings.RAILWAYS_API_KEY or ""
+    rapidapi_key = settings.RAPIDAPI_KEY or ""
     is_railways_connected = (railways_api_key not in ["", "your_railways_api_key_here"]) or (rapidapi_key not in ["", "your_key_here"])
     railways_status = "Connected" if is_railways_connected else "Disconnected"
 
     # Twilio SMS
-    twilio_sid = os.getenv("TWILIO_ACCOUNT_SID", "")
-    twilio_token = os.getenv("TWILIO_AUTH_TOKEN", "")
+    twilio_sid = settings.TWILIO_ACCOUNT_SID or ""
+    twilio_token = settings.TWILIO_AUTH_TOKEN or ""
     is_twilio_connected = twilio_sid not in ["", "mock_sid"] and twilio_token not in ["", "mock_token"]
     twilio_status = "Connected" if is_twilio_connected else "Disconnected"
 
@@ -278,9 +286,9 @@ async def get_system_status():
         "twilio_sms": twilio_status,
         "mongodb": mongo_status,
         "contacts": {
-            "maintenance": os.getenv("MAINTENANCE_PHONE", "+919651058174"),
-            "operations": os.getenv("OPERATIONS_PHONE", "+919651058174"),
-            "station_manager": os.getenv("STATION_PHONE", "+919651058174")
+            "maintenance": settings.MAINTENANCE_PHONE,
+            "operations": settings.OPERATIONS_PHONE,
+            "station_manager": settings.STATION_PHONE
         }
     }
 

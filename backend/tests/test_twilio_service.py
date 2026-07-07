@@ -11,12 +11,12 @@ from backend.services.twilio_service import send_sms, TwilioSMSClient
 @pytest.mark.asyncio
 async def test_send_sms_exception():
     # Mock os.getenv to simulate DEMO_MODE not being "true"
-    with patch("os.getenv") as mock_getenv:
+    with patch("backend.services.twilio_service.settings.DEMO_MODE", "false"):
         def getenv_side_effect(key, default=None):
             if key == "DEMO_MODE":
                 return "false"
             return None
-        mock_getenv.side_effect = getenv_side_effect
+
 
         # Mock the client object within the twilio_service module
         with patch("backend.services.twilio_service.client") as mock_client:

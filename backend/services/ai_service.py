@@ -7,6 +7,10 @@ from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage, AI
 
 from dotenv import load_dotenv # type: ignore
 
+from ..circuit_breaker import anthropic_breaker, with_circuit_breaker
+import httpx
+
+
 env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
 load_dotenv(dotenv_path=env_path)
 
@@ -151,6 +155,27 @@ def generate_dynamic_fallback(anomaly: dict, anomaly_type: str = None, errors: l
         "reasoning_steps": reasoning_steps
     }
 
+
+async def reason_with_ai_fallback(*args, **kwargs):
+    # Dummy fallback to an assumed local model via httpx
+    # In a real scenario, this queries a local Ollama or vLLM server
+    try:
+        async with httpx.AsyncClient() as client:
+            res = await client.post("http://localhost:11434/api/generate", json={
+                "model": "llama3",
+                "prompt": "You are a backup AI. Provide a generic fallback JSON response for a train anomaly.",
+                "stream": False
+            }, timeout=5.0)
+            text = res.json().get("response", "{}")
+            return MitigationPlan.model_validate_json(text).model_dump()
+    except Exception:
+        # Failsafe mock mitigation
+        return MitigationPlan(
+            situation_summary="Backup LLM engaged. Delay detected.",
+            actions=[{"tool_name": "hold_train", "parameters": {"train_no": "Unknown", "station": "Unknown", "duration_mins": 10}}]
+        ).model_dump()
+
+@with_circuit_breaker(anthropic_breaker, fallback_func=reason_with_ai_fallback)
 async def reason_with_ai(anomalies: list, errors: list = None) -> dict:
     if not anomalies:
         return {}

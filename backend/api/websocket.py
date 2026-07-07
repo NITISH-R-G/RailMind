@@ -1,3 +1,4 @@
+from ..config import settings
 import asyncio
 import json
 import logging
@@ -9,7 +10,7 @@ import redis.asyncio as redis
 
 logger = logging.getLogger(__name__)
 
-REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
+REDIS_URL = settings.REDIS_URL
 
 class ConnectionManager:
     """
