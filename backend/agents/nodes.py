@@ -1,3 +1,4 @@
+from ..config import settings
 import os
 import json
 import logging
@@ -13,18 +14,54 @@ from ..services.railways_api import get_live_train_status, get_cancelled_trains,
 from ..services.twilio_service import TwilioSMSClient
 from ..api.websocket import websocket_manager
 
-logger = logging.getLogger(__name__)
+from prometheus_client import Counter, Histogram, Gauge
+import time
+
+# Prometheus Metrics
+
+def track_node_metrics(node_name):
+    def decorator(func):
+        async def wrapper(*args, **kwargs):
+            start_time = time.time()
+            try:
+                result = await func(*args, **kwargs)
+                node_latency_metric.labels(node_name=node_name).observe(time.time() - start_time)
+                return result
+            except Exception as e:
+                error_rate_metric.labels(node_name=node_name, error_type=type(e).__name__).inc()
+                raise e
+        return wrapper
+    return decorator
+token_consumption_metric = Counter("sub_agent_token_consumption", "Token consumption by sub-agents", ["agent_name"])
+node_latency_metric = Histogram("langgraph_node_latency_seconds", "Latency of LangGraph nodes", ["node_name"])
+error_rate_metric = Counter("langgraph_node_errors", "Errors encountered in nodes", ["node_name", "error_type"])
+twilio_status_metric = Gauge("twilio_api_status", "Current status of Twilio API connection", ["phone_number"])
+
+
+
+import logging
+from pythonjsonlogger import jsonlogger
+from logging.handlers import RotatingFileHandler
+
+import os
+os.makedirs("/var/log/railmind", exist_ok=True)
+
+logger = logging.getLogger("railmind_nodes")
+logger.setLevel(logging.INFO)
+
+# Structured JSON Handler
+logHandler = RotatingFileHandler('/var/log/railmind/app.json', maxBytes=10485760, backupCount=5)
+formatter = jsonlogger.JsonFormatter('%(asctime)s %(levelname)s %(name)s %(message)s')
+logHandler.setFormatter(formatter)
+logger.addHandler(logHandler)
+
 
 # Ensure env variables are loaded before configuration
 env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
 load_dotenv(dotenv_path=env_path)
-api_key = os.getenv("RAILWAYS_API_KEY", "mock_key")
-railways_client = RailwaysAPIClient(api_key=api_key)
+railways_client = RailwaysAPIClient(api_key=settings.RAILWAYS_API_KEY)
 
-twilio_sid = os.getenv("TWILIO_ACCOUNT_SID", "mock_sid")
-twilio_token = os.getenv("TWILIO_AUTH_TOKEN", "mock_token")
-twilio_from = os.getenv("TWILIO_PHONE_NUMBER", "+1234567890")
-twilio_client = TwilioSMSClient(account_sid=twilio_sid, auth_token=twilio_token, from_number=twilio_from)
+twilio_client = TwilioSMSClient(account_sid=settings.TWILIO_ACCOUNT_SID, auth_token=settings.TWILIO_AUTH_TOKEN, from_number=settings.TWILIO_PHONE_NUMBER)
 
 # Shared log assistant that prints logs and broadcasts AGENT_LOG & AGENT_STATE_CHANGE WebSocket events
 async def log_agent(node_name: str, message: str):
@@ -152,6 +189,7 @@ async def evaluate_previous_action(state: AgentState) -> AgentState:
         await log_agent("evaluate_previous_action", f"[RAILMIND] [ERROR] Self-healing evaluation failed: {e}")
     return state
 
+@track_node_metrics('ingest_node')
 async def ingest_node(state: AgentState) -> AgentState:
     try:
         await log_agent("SCANNING", "Polling 15 trains on Indian Railways...")
@@ -235,6 +273,7 @@ async def ingest_node(state: AgentState) -> AgentState:
         await log_agent("ingest_node", f"[RAILMIND] [ERROR] Ingest node failed: {e}")
     return state
 
+@track_node_metrics('detect_node')
 async def detect_node(state: AgentState) -> AgentState:
     try:
         await log_agent("detect_node", "[RAILMIND] Running real-time anomaly detection rules...")
@@ -437,6 +476,7 @@ async def detect_cascade(anomalies: list) -> dict:
             }
     return {"is_cascade": False}
 
+@track_node_metrics('predict_node')
 async def predict_node(state: AgentState) -> AgentState:
     try:
         await log_agent("predict_node", "[RAILMIND] Running predictive intelligence model...")
@@ -568,8 +608,8 @@ def generate_mock_json_fallback(prompt: str, state: AgentState) -> dict:
         }
 
 async def call_gemini(prompt: str, state: AgentState = None) -> dict:
-    gemini_key = os.getenv("GEMINI_API_KEY")
-    anthropic_key = os.getenv("ANTHROPIC_API_KEY")
+    gemini_key = settings.GEMINI_API_KEY
+    anthropic_key = settings.ANTHROPIC_API_KEY
     
     response_text = None
     
@@ -691,9 +731,9 @@ async def execute_tool(tool_name: str, params: dict, reason: str, state: AgentSt
             logger.warning(f"Failed to save task to MongoDB: {e}")
             
         # Send SMS alert via Twilio
-        m_phone = os.getenv("MAINTENANCE_PHONE", "+1234567891")
-        o_phone = os.getenv("OPERATIONS_PHONE", "+1234567892")
-        s_phone = os.getenv("STATION_PHONE", "+1234567893")
+        m_phone = settings.MAINTENANCE_PHONE
+        o_phone = settings.OPERATIONS_PHONE
+        s_phone = settings.STATION_PHONE
         phone_map = {
             "maintenance": m_phone,
             "operations": o_phone,
@@ -727,7 +767,7 @@ async def execute_tool(tool_name: str, params: dict, reason: str, state: AgentSt
     # 4. Send Passenger Alert
     elif tool_name == "send_passenger_alert":
         msg = params.get("message") or reason
-        p_phone = os.getenv("DEMO_PASSENGER_PHONE", "+1234567894")
+        p_phone = settings.DEMO_PASSENGER_PHONE
         if p_phone:
             try:
                 sid = await twilio_client.send_incident_alert(p_phone, msg[:160])
@@ -744,6 +784,7 @@ async def execute_tool(tool_name: str, params: dict, reason: str, state: AgentSt
         summary = params.get("incident_summary") or reason
         await log_agent("reason_node", f"[TOOL SUCCESS] Incident escalated to Central Control Room: {summary}")
 
+@track_node_metrics('reason_node')
 async def reason_node(state: AgentState) -> AgentState:
     try:
         anomalies = state.get("anomalies", [])
@@ -913,6 +954,7 @@ async def reason_node(state: AgentState) -> AgentState:
 
 from .routing import dijkstra_route_discovery
 
+@track_node_metrics('reroute_node')
 async def reroute_node(state: AgentState) -> AgentState:
     try:
         await log_agent("reroute_node", "[RAILMIND] Checking and resolving rerouting options...")
@@ -957,6 +999,7 @@ async def reroute_node(state: AgentState) -> AgentState:
         await log_agent("reroute_node", f"[RAILMIND] [ERROR] Reroute node failed: {e}")
     return {"detour_route": []}
 
+@track_node_metrics('coordination_node')
 async def coordination_node(state: AgentState) -> AgentState:
     try:
         await log_agent("coordination_node", "[RAILMIND] Initiating department task dispatches...")
@@ -1063,13 +1106,14 @@ async def coordination_node(state: AgentState) -> AgentState:
         await log_agent("coordination_node", f"[RAILMIND] [ERROR] Coordination node failed: {e}")
     return {}
 
+@track_node_metrics('alert_node')
 async def alert_node(state: AgentState) -> AgentState:
     try:
         await log_agent("alert_node", "[RAILMIND] Sending Twilio notifications...")
-        m_phone = os.getenv("MAINTENANCE_PHONE", "+1234567891")
-        o_phone = os.getenv("OPERATIONS_PHONE", "+1234567892")
-        s_phone = os.getenv("STATION_PHONE", "+1234567893")
-        p_phone = os.getenv("DEMO_PASSENGER_PHONE", "+1234567894")
+        m_phone = settings.MAINTENANCE_PHONE
+        o_phone = settings.OPERATIONS_PHONE
+        s_phone = settings.STATION_PHONE
+        p_phone = settings.DEMO_PASSENGER_PHONE
 
         phone_map = {
             "maintenance": m_phone,
@@ -1130,6 +1174,7 @@ async def save_incident_if_not_duplicate(incident):
     print(f"[RAILMIND] New incident saved: {incident['incident_title']}")
     return True
 
+@track_node_metrics('report_node')
 async def report_node(state: AgentState) -> AgentState:
     try:
         await log_agent("report_node", "[RAILMIND] Broadcasting operations report...")
@@ -1299,6 +1344,7 @@ async def report_node(state: AgentState) -> AgentState:
         await log_agent("report_node", f"[RAILMIND] [ERROR] Report node failed: {e}")
     return {}
 
+@track_node_metrics('supervisor_node')
 async def supervisor_node(state: AgentState) -> dict:
     try:
         last_node = state.get("last_node_executed")

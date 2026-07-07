@@ -1,3 +1,4 @@
+from .config import settings
 import asyncio
 import os
 import uuid
@@ -110,4 +111,4 @@ class WorkerSettings:
     ]
     on_startup = startup
     on_shutdown = shutdown
-    redis_settings = RedisSettings(host=os.getenv("REDIS_HOST", "localhost"), port=6379)
+    redis_settings = RedisSettings(host=settings.REDIS_HOST, port=settings.REDIS_PORT)

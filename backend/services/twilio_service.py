@@ -1,10 +1,14 @@
+from ..config import settings
+
+from ..circuit_breaker import twilio_breaker, with_circuit_breaker
+
 from twilio.rest import Client # type: ignore
 import os
 from typing import Optional
 
-account_sid = os.getenv("TWILIO_ACCOUNT_SID")
-auth_token = os.getenv("TWILIO_AUTH_TOKEN")
-from_number = os.getenv("TWILIO_PHONE_NUMBER")
+account_sid = settings.TWILIO_ACCOUNT_SID
+auth_token = settings.TWILIO_AUTH_TOKEN
+from_number = settings.TWILIO_PHONE_NUMBER
 
 # Initialize Twilio Client
 try:
@@ -16,9 +20,15 @@ except Exception as e:
     print(f"[RAILMIND] Twilio client initialization failed: {e}")
     client = None
 
+
+async def send_sms_fallback(*args, **kwargs):
+    print("Twilio circuit broken. Writing alert to local log fallback.")
+    return False
+
+@with_circuit_breaker(twilio_breaker, fallback_func=send_sms_fallback)
 async def send_sms(to: str, message: str) -> bool:
     # Check DEMO_MODE to bypass real SMS charges
-    if os.getenv("DEMO_MODE") == "true":
+    if settings.DEMO_MODE == "true":
         print(f"[DEMO SMS ALERT] Bypassed sending to {to}: {message}")
         return True
     try:
@@ -40,9 +50,9 @@ async def send_sms(to: str, message: str) -> bool:
 async def send_department_alerts(department_tasks: list) -> list:
     sent = []
     dept_phones = {
-        "maintenance": os.getenv("MAINTENANCE_PHONE"),
-        "operations": os.getenv("OPERATIONS_PHONE"),
-        "station_manager": os.getenv("STATION_PHONE")
+        "maintenance": settings.MAINTENANCE_PHONE,
+        "operations": settings.OPERATIONS_PHONE,
+        "station_manager": settings.STATION_PHONE
     }
     for task in department_tasks:
         phone = dept_phones.get(task["department"])
@@ -53,15 +63,15 @@ async def send_department_alerts(department_tasks: list) -> list:
                 sent.append(f"{task['department']} -> {phone}")
     
     passenger_sms = f"[RailMind Alert] Train delay detected. Please check platform boards for updates."
-    await send_sms(os.getenv("DEMO_PASSENGER_PHONE"), passenger_sms)
+    await send_sms(settings.DEMO_PASSENGER_PHONE, passenger_sms)
     
     return sent
 
 class TwilioSMSClient:
     def __init__(self, account_sid: str = None, auth_token: str = None, from_number: str = None):
-        self.account_sid = account_sid or os.getenv("TWILIO_ACCOUNT_SID")
-        self.auth_token = auth_token or os.getenv("TWILIO_AUTH_TOKEN")
-        self.from_number = from_number or os.getenv("TWILIO_PHONE_NUMBER")
+        self.account_sid = account_sid or settings.TWILIO_ACCOUNT_SID
+        self.auth_token = auth_token or settings.TWILIO_AUTH_TOKEN
+        self.from_number = from_number or settings.TWILIO_PHONE_NUMBER
         try:
             if self.account_sid and self.auth_token:
                 self.client = Client(self.account_sid, self.auth_token)
@@ -71,7 +81,7 @@ class TwilioSMSClient:
             self.client = None
 
     async def send_incident_alert(self, to_number: str, message_body: str) -> Optional[str]:
-        if os.getenv("DEMO_MODE") == "true":
+        if settings.DEMO_MODE == "true":
             print(f"[DEMO SMS CLIENT] Bypassed sending to {to_number}: {message_body}")
             return "SMdemo1234567890abcdef"
         try:
