@@ -105,7 +105,7 @@ async def websocket_endpoint(websocket: WebSocket):
             # Add ping-pong heartbeats
             data = await websocket.receive_text()
             if data == "PING" or data == "PING_TEST":
-                await websocket.send_json({"type": "echo", "received": data})
+                await websocket.send_json({"type": "PONG"})
             else:
                 await websocket.send_json({
                     "type": "echo",

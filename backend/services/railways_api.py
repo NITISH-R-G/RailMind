@@ -164,7 +164,7 @@ def parse_rapidapi_train_for_agent(data: dict, train_number: str) -> dict:
     status = "on_time"
     if delay_minutes > 60:
         status = "severely_delayed"
-    elif delay_minutes > 15:
+    elif delay_minutes >= 15:
         status = "delayed"
         
     title = str(outer_data.get("title", "")).lower()
@@ -711,7 +711,7 @@ def get_dynamic_position_and_status(train_number: str) -> dict:
     if delay == 0:
         passenger_load = "normal"
         status = "On Time"
-    elif delay <= 15:
+    elif delay < 15:
         passenger_load = "medium"
         status = "Delayed"
     elif delay <= 30:
