@@ -195,9 +195,10 @@ Previous errors from Supervisor (if any, please correct your plan):
             SystemMessage(content=system_prompt),
             HumanMessage(content=user_prompt)
         ]
-        from langgraph.prebuilt import create_react_agent
+        import langgraph.prebuilt
 
-        agent = create_react_agent(llm, tools)
+        # Pass the tool functions into the react agent to enable autonomous execution loops
+        agent = langgraph.prebuilt.create_react_agent(llm, tools)
 
         # Run autonomous tool-calling loop
         result = await agent.ainvoke({"messages": messages})
