@@ -1,4 +1,8 @@
-import React, { useEffect, useState } from 'react';
+with open("frontend/src/components/LiveMap.jsx", "r") as f:
+    content = f.read()
+
+# Strip out everything and build it correctly from scratch
+new_content = """import React, { useEffect, useState } from 'react';
 import { MapContainer, TileLayer, Marker, Polyline, ZoomControl } from 'react-leaflet';
 import L from 'leaflet';
 import useStore from '../store';
@@ -25,7 +29,7 @@ const STATION_COORDS = {
 const parseReroutePlan = (planString) => {
   if (!planString) return [];
   // basic parsing to find station codes
-  const words = planString.split(/[\s,>➔-]/);
+  const words = planString.split(/[\\s,>➔-]/);
   const path = [];
   for (const word of words) {
     const code = word.trim().toUpperCase();
@@ -156,3 +160,7 @@ export default function LiveMap() {
     </div>
   );
 }
+"""
+
+with open("frontend/src/components/LiveMap.jsx", "w") as f:
+    f.write(new_content)
