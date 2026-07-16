@@ -744,15 +744,35 @@ async def execute_tool(tool_name: str, params: dict, reason: str, state: AgentSt
         summary = params.get("incident_summary") or reason
         await log_agent("reason_node", f"[TOOL SUCCESS] Incident escalated to Central Control Room: {summary}")
 
-async def reason_node(state: AgentState) -> AgentState:
+async def reason_node(state: AgentState) -> dict:
     try:
         anomalies = state.get("anomalies", [])
         if not anomalies:
-            state["claude_reasoning"] = "{}"
-            state["reroute_plan"] = None
-            state["incident_report"] = None
             await log_agent("reason_node", "[RAILMIND] [OK] All trains nominal, skipping AI reasoning")
-            return state
+            return {"claude_reasoning": "{}", "reroute_plan": None, "incident_report": None, "last_node_executed": "reason_node"}
+
+        await log_agent("reason_node", f"[RAILMIND] Contacting AI to reason about {len(anomalies)} anomalies...")
+
+        import time
+        start_time = time.time()
+
+        errors = state.get("errors", [])
+
+        # Call the autonomous tool-calling AI service
+        result_plan = await reason_with_ai(anomalies, errors)
+
+        latency = int((time.time() - start_time) * 1000)
+        await log_agent("reason_node", f"[RAILMIND] Real Autonomous Brain cycle complete ({latency}ms)")
+
+        return {
+            "claude_reasoning": json.dumps(result_plan),
+            "ai_latency_ms": latency,
+            "last_node_executed": "reason_node"
+        }
+    except Exception as e:
+        logger.error(f"Error in reason_node: {e}")
+        await log_agent("reason_node", f"[RAILMIND] [ERROR] Reason node failed: {e}")
+        return {"last_node_executed": "reason_node"}
 
         # Fetch last 5 incidents for historical context
         try:
@@ -913,7 +933,7 @@ async def reason_node(state: AgentState) -> AgentState:
 
 from .routing import dijkstra_route_discovery
 
-async def reroute_node(state: AgentState) -> AgentState:
+async def reroute_node(state: AgentState) -> dict:
     try:
         await log_agent("reroute_node", "[RAILMIND] Checking and resolving rerouting options...")
         anomalies = state.get("anomalies", [])
@@ -926,37 +946,43 @@ async def reroute_node(state: AgentState) -> AgentState:
             if start_station == "Kanpur Central" and not target_station:
                 target_station = "Varanasi"
 
-                # Add geo-coordinate checking for A* or DP route discovery fallback
-                lat = anomaly.get("lat")
-                lng = anomaly.get("lng")
-                await log_agent("reroute_node", f"[RAILMIND] Evaluating geo-coordinates (lat: {lat}, lng: {lng}) for track availability...")
+            # Add geo-coordinate checking for A* or DP route discovery fallback
+            lat = anomaly.get("lat")
+            lng = anomaly.get("lng")
+            await log_agent("reroute_node", f"[RAILMIND] Evaluating geo-coordinates (lat: {lat}, lng: {lng}) for track availability...")
 
-                # Bypassing the anomaly location
-                blocked = anomaly.get("location") or start_station
-                result = dijkstra_route_discovery(start_station, target_station, blocked_station=blocked)
-                # If path not found due to blockage, try standard routing
-                if result["status"] != "Success":
-                    result = dijkstra_route_discovery(start_station, target_station)
+            from .routing import dijkstra_route_discovery
 
-                if result["status"] == "Success":
-                    route_str = " -> ".join(result["route"])
-                    await log_agent("reroute_node", f"[RAILMIND] Dijkstra bypass found: {route_str}")
-                    return {
-                        "reroute_plan": f"Dijkstra detour bypass: {route_str} (ETA {result['cost']} mins)",
-                        "detour_route": result["route"]
-                    }
-                else:
-                    status_msg = result.get("status", "Unknown status")
-                    await log_agent("reroute_node", f"[RAILMIND] No bypass route found: {status_msg}")
-                    return {
-                        "reroute_plan": f"No detour bypass available: {status_msg}",
-                        "detour_route": []
-                    }
+            # Bypassing the anomaly location
+            blocked = anomaly.get("location") or start_station
+            result = dijkstra_route_discovery(start_station, target_station, blocked_station=blocked)
+            # If path not found due to blockage, try standard routing
+            if result["status"] != "Success":
+                result = dijkstra_route_discovery(start_station, target_station)
+
+            if result["status"] == "Success":
+                route_str = " -> ".join(result["route"])
+                await log_agent("reroute_node", f"[RAILMIND] Dijkstra bypass found: {route_str}")
+                return {
+                    "reroute_plan": f"Dijkstra detour bypass: {route_str} (ETA {result['cost']} mins)",
+                    "detour_route": result["route"],
+                    "last_node_executed": "reroute_node"
+                }
+            else:
+                await log_agent("reroute_node", f"[RAILMIND] No alternate route found.")
+                return {
+                    "reroute_plan": "No valid alternate route found. Hold at current station.",
+                    "detour_route": [],
+                    "last_node_executed": "reroute_node"
+                }
+
+        return {"last_node_executed": "reroute_node"}
     except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
         logger.error(f"Error in reroute_node: {e}")
         await log_agent("reroute_node", f"[RAILMIND] [ERROR] Reroute node failed: {e}")
-    return {"detour_route": []}
-
+        return {"last_node_executed": "reroute_node"}
 async def coordination_node(state: AgentState) -> AgentState:
     try:
         await log_agent("coordination_node", "[RAILMIND] Initiating department task dispatches...")
@@ -1304,13 +1330,17 @@ async def supervisor_node(state: AgentState) -> dict:
         last_node = state.get("last_node_executed")
         await log_agent("supervisor_node", f"[RAILMIND] Supervisor evaluating graph state... (Last execution: {last_node})")
 
-        anomalies = state.get("anomalies", [])
-        if last_node == "supervisor_node" and (not anomalies or state.get("should_continue") is False):
-            return {"next_node": "END", "last_node_executed": "supervisor_node"}
+        # Initial workflow routing (evaluate -> ingest -> detect -> predict)
+        if last_node == "evaluate_previous_action":
+            return {"next_node": "ingest_node", "last_node_executed": "supervisor_node"}
+        if last_node == "ingest_node":
+            return {"next_node": "detect_node", "last_node_executed": "supervisor_node"}
+        if last_node == "detect_node":
+            return {"next_node": "predict_node", "last_node_executed": "supervisor_node"}
 
-        # If we just came from ingest, we must go to detect.
-        if not last_node or last_node == "ingest_node" or last_node == "supervisor_node" and not anomalies:
-             return {"next_node": "detect_node", "last_node_executed": "supervisor_node"}
+        anomalies = state.get("anomalies", [])
+        if not anomalies or state.get("should_continue") is False:
+            return {"next_node": "END", "last_node_executed": "supervisor_node"}
 
         # If reasoning hasn't happened or failed to produce plan
         if not state.get("claude_reasoning") or state.get("claude_reasoning") == "{}":
