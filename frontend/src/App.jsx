@@ -7,6 +7,9 @@ import IncidentFeed from './components/IncidentFeed';
 import TaskBoard from './components/TaskBoard';
 import RouteIntelligence from './components/RouteIntelligence';
 import { ShieldAlert, AlertTriangle, Info, Check, CornerDownRight, Terminal, RefreshCw, X, Shield, User, HelpCircle, Activity, Bell, Settings } from 'lucide-react';
+import { useStore } from './store';
+import { List } from 'react-window';
+
 
 class ErrorBoundary extends React.Component {
   constructor(props) {
@@ -61,15 +64,29 @@ class ErrorBoundary extends React.Component {
   }
 }
 
+
 function MainApp() {
-  const [activeTab, setActiveTab] = useState('Dashboard');
+  const activeTab = useStore(state => state.activeTab);
+  const setActiveTab = useStore(state => state.setActiveTab);
+  const incidents = useStore(state => state.incidents);
+  const setIncidents = useStore(state => state.setIncidents);
+  const addIncident = useStore(state => state.addIncident);
+  const updateIncidentApproved = useStore(state => state.updateIncidentApproved);
+  const removeIncident = useStore(state => state.removeIncident);
+  const tasks = useStore(state => state.tasks);
+  const setTasks = useStore(state => state.setTasks);
+  const resolveTask = useStore(state => state.resolveTask);
+  const trains = useStore(state => state.trains);
+  const setTrains = useStore(state => state.setTrains);
+  const logs = useStore(state => state.logs);
+  const addLog = useStore(state => state.addLog);
+  const wsStatus = useStore(state => state.wsStatus);
+  const setWsStatus = useStore(state => state.setWsStatus);
+  const telemetry = useStore(state => state.telemetry);
+  const setTelemetry = useStore(state => state.setTelemetry);
+
   const [loopCount, setLoopCount] = useState(0);
-  const [incidentCount, setIncidentCount] = useState(0);
-  const [incidents, setIncidents] = useState([]);
-  const [tasks, setTasks] = useState([]);
-  const [trains, setTrains] = useState([]);
-  const [wsStatus, setWsStatus] = useState('reconnecting');
-  const [logs, setLogs] = useState([]);
+
   
   // Modal Overlay States
   const [showSettings, setShowSettings] = useState(false);
@@ -129,7 +146,7 @@ function MainApp() {
           train_number: inc.train_number || 'Unknown'
         }));
         setIncidents(formatted);
-        setIncidentCount(formatted.length);
+
       }
     } catch (err) {
       console.error("[API] Failed to fetch incidents:", err);
@@ -207,10 +224,7 @@ function MainApp() {
               train_number: report.train_number || 'Unknown'
             };
 
-            setIncidents(prev => {
-              if (prev.some(inc => inc.id === newIncident.id)) return prev;
-              return [newIncident, ...prev];
-            });
+            addIncident(newIncident);
             setIncidentCount(prev => prev + 1);
             if (report.loop_count !== undefined) {
               setLoopCount(report.loop_count);
@@ -219,7 +233,7 @@ function MainApp() {
             fetchTasks();
             fetchTrains();
           } else if (payload.type === 'AGENT_LOG') {
-            setLogs(prev => [...prev, payload].slice(-200)); // Keep last 200 logs
+            addLog(payload);
           }
         } catch (err) {
           console.error("[WEBSOCKET] Error parsing socket data:", err);
@@ -261,12 +275,7 @@ function MainApp() {
         headers: headers
       });
       if (res.ok) {
-        setIncidents(prev => prev.map(inc => {
-          if (inc.id === incidentId) {
-            return { ...inc, approved: true };
-          }
-          return inc;
-        }));
+        updateIncidentApproved(incidentId);
       } else if (res.status === 401) {
         alert("Incorrect admin password.");
         console.error("Unauthorized: Incorrect admin password.");
@@ -280,8 +289,7 @@ function MainApp() {
 
   const handleAcknowledge = (incidentId) => {
     console.log(`Acknowledging warning incident: ${incidentId}`);
-    setIncidents(prev => prev.filter(inc => inc.id !== incidentId));
-    setIncidentCount(prev => Math.max(0, prev - 1));
+    removeIncident(incidentId);
   };
 
   const handleResolve = async (taskId) => {
@@ -291,12 +299,7 @@ function MainApp() {
         method: 'POST'
       });
       if (res.ok) {
-        setTasks(prev => prev.map(t => {
-          if (t._id === taskId || t.id === taskId) {
-            return { ...t, status: 'resolved', urgency: 'resolved' };
-          }
-          return t;
-        }));
+        resolveTask(taskId);
       } else {
         console.error("Failed to mark task resolved on API server");
       }
