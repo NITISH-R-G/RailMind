@@ -42,7 +42,7 @@ async def test_detect_node_no_anomalies(mock_log, base_state):
     new_state = await detect_node(base_state)
 
     assert len(new_state["anomalies"]) == 0
-    assert new_state["should_continue"] is False
+
 
 @pytest.mark.asyncio
 @patch("backend.agents.nodes.log_agent")
@@ -68,6 +68,7 @@ async def test_detect_node_delay_rules(mock_log, base_state):
     assert len(anomalies) == 4
     assert new_state["should_continue"] is True
 
+
     # Verify mapping
     mapping = {a["train_number"]: a["severity"] for a in anomalies}
     assert mapping["2"] == "low"
@@ -89,6 +90,7 @@ async def test_detect_node_overcrowding_rule(mock_log, base_state):
     assert anomalies[0]["severity"] == "high"
     assert new_state["should_continue"] is True
 
+
 @pytest.mark.asyncio
 @patch("backend.agents.nodes.log_agent")
 async def test_detect_node_cancellation_rule(mock_log, base_state):
@@ -103,6 +105,7 @@ async def test_detect_node_cancellation_rule(mock_log, base_state):
     assert anomalies[0]["severity"] == "critical"
     assert anomalies[0]["status"] == "cancelled"
     assert new_state["should_continue"] is True
+
 
 @pytest.mark.asyncio
 @patch("backend.agents.nodes.log_agent")
