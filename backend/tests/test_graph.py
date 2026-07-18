@@ -26,7 +26,7 @@ async def test_reason_node_tool_recovery():
     }]
 
     state: AgentState = {
-        "raw_train_data": [],
+        "raw_train_data": [{"train_number": "12301"}],
         "anomalies": anomalies,
         "claude_reasoning": "",
         "reroute_plan": None,
@@ -35,7 +35,8 @@ async def test_reason_node_tool_recovery():
         "incident_report": None,
         "loop_count": 0,
         "should_continue": True,
-        "last_api_call": "",
+        "last_api_call": "some_time",
+            "prediction": {"impact": "none"},
         "railways_latency_ms": 0,
         "ai_latency_ms": 0,
         "processed_trains": [],
@@ -72,7 +73,7 @@ async def test_supervisor_self_correction():
     })
 
     state: AgentState = {
-        "raw_train_data": [],
+        "raw_train_data": [{"train_number": "12301"}],
         "anomalies": [{"train_number": "12301", "train_name": "Test Train", "anomaly_type": "delay", "severity": "high", "location": "Kanpur", "delay_minutes": 100, "passenger_load": "high"}],
         "claude_reasoning": bad_reasoning,
         "reroute_plan": None,
@@ -81,7 +82,8 @@ async def test_supervisor_self_correction():
         "incident_report": None,
         "loop_count": 0,
         "should_continue": True,
-        "last_api_call": "",
+        "last_api_call": "some_time",
+            "prediction": {"impact": "none"},
         "railways_latency_ms": 0,
         "ai_latency_ms": 100,
         "processed_trains": [],
