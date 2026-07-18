@@ -1,0 +1,100 @@
+version: '3.8'
+
+services:
+  fastapi:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: railmind-fastapi:latest
+    container_name: railmind-api
+    ports:
+      - "8000:8000"
+    environment:
+      - MONGODB_URI=mongodb://admin:secret@mongodb:27017/railmind?authSource=admin
+      - REDIS_URL=redis://redis:6379/0
+      - REDIS_HOST=redis
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    volumes:
+      - railmind-logs:/var/log/railmind
+    restart: unless-stopped
+
+  arq-worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: railmind-arq-worker:latest
+    container_name: railmind-arq-worker
+    command: ["arq", "worker.WorkerSettings"]
+    environment:
+      - MONGODB_URI=mongodb://admin:secret@mongodb:27017/railmind?authSource=admin
+      - REDIS_URL=redis://redis:6379/0
+      - REDIS_HOST=redis
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    volumes:
+      - railmind-logs:/var/log/railmind
+    restart: unless-stopped
+
+  mongodb:
+    image: mongo:6.0
+    container_name: railmind-mongo
+    ports:
+      - "27017:27017"
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=admin
+      - MONGO_INITDB_ROOT_PASSWORD=secret
+      - MONGO_INITDB_DATABASE=railmind
+    volumes:
+      - mongodb-data:/data/db
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/test --quiet
+      interval: 10s
+      timeout: 10s
+      retries: 5
+    restart: unless-stopped
+
+  redis:
+    image: redis:7.0-alpine
+    container_name: railmind-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v2.45.0
+    container_name: railmind-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus-data:/prometheus
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:10.0.3
+    container_name: railmind-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
+volumes:
+  mongodb-data:
+  redis-data:
+  prometheus-data:
+  grafana-data:
+  railmind-logs:

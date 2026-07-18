@@ -6,6 +6,11 @@ from dotenv import load_dotenv
 from typing import Dict, Any, List
 from uuid import uuid4
 from datetime import datetime
+import time
+from pythonjsonlogger import jsonlogger
+from .metrics import NODE_LATENCY, AI_TOKEN_CONSUMPTION, ERROR_SPIKES
+from ..config import settings
+
 from ..services.ai_service import reason_with_ai
 from .state import AgentState, TrainAnomaly, DepartmentTask
 from ..services.db_client import db_client
@@ -13,7 +18,18 @@ from ..services.railways_api import get_live_train_status, get_cancelled_trains,
 from ..services.twilio_service import TwilioSMSClient
 from ..api.websocket import websocket_manager
 
+
 logger = logging.getLogger(__name__)
+try:
+    import logging.handlers
+    logHandler = logging.handlers.RotatingFileHandler('/var/log/railmind/app.json', maxBytes=10485760, backupCount=5)
+    formatter = jsonlogger.JsonFormatter('%(asctime)s %(levelname)s %(name)s %(message)s')
+    logHandler.setFormatter(formatter)
+    logger.addHandler(logHandler)
+    logger.setLevel(logging.INFO)
+except Exception as e:
+    print(f"Could not setup JSON logging: {e}")
+
 
 # Ensure env variables are loaded before configuration
 env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
@@ -153,6 +169,7 @@ async def evaluate_previous_action(state: AgentState) -> AgentState:
     return state
 
 async def ingest_node(state: AgentState) -> AgentState:
+    start_time = time.time()
     try:
         await log_agent("SCANNING", "Polling 15 trains on Indian Railways...")
         # If evaluate_previous_action already populated the raw train data, reuse it
@@ -233,9 +250,13 @@ async def ingest_node(state: AgentState) -> AgentState:
     except Exception as e:
         logger.error(f"Error in ingest_node: {e}")
         await log_agent("ingest_node", f"[RAILMIND] [ERROR] Ingest node failed: {e}")
+        ERROR_SPIKES.labels(error_type="exception", node_name="ingest_node").inc()
+    finally:
+        NODE_LATENCY.labels(node_name="ingest_node").observe(time.time() - start_time)
     return state
 
 async def detect_node(state: AgentState) -> AgentState:
+    start_time = time.time()
     try:
         await log_agent("detect_node", "[RAILMIND] Running real-time anomaly detection rules...")
         anomalies: List[TrainAnomaly] = []
@@ -366,6 +387,9 @@ async def detect_node(state: AgentState) -> AgentState:
     except Exception as e:
         logger.error(f"Error in detect_node: {e}")
         await log_agent("detect_node", f"[RAILMIND] [ERROR] Detect node failed: {e}")
+        ERROR_SPIKES.labels(error_type="exception", node_name="detect_node").inc()
+    finally:
+        NODE_LATENCY.labels(node_name="detect_node").observe(time.time() - start_time)
     return state
 
 def get_station_code_from_name(station_name: str) -> str:
@@ -745,6 +769,8 @@ async def execute_tool(tool_name: str, params: dict, reason: str, state: AgentSt
         await log_agent("reason_node", f"[TOOL SUCCESS] Incident escalated to Central Control Room: {summary}")
 
 async def reason_node(state: AgentState) -> AgentState:
+    import time
+    start_time_metric = time.time()
     try:
         anomalies = state.get("anomalies", [])
         if not anomalies:
@@ -909,6 +935,9 @@ async def reason_node(state: AgentState) -> AgentState:
     except Exception as e:
         logger.error(f"Error in reason_node: {e}")
         await log_agent("reason_node", f"[RAILMIND] [ERROR] Reason node failed: {e}")
+        ERROR_SPIKES.labels(error_type="exception", node_name="reason_node").inc()
+    finally:
+        NODE_LATENCY.labels(node_name="reason_node").observe(time.time() - start_time_metric)
     return state
 
 from .routing import dijkstra_route_discovery
