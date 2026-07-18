@@ -4,6 +4,9 @@ from pydantic import BaseModel, Field
 from langchain_anthropic import ChatAnthropic
 from langchain_core.tools import tool
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage, AIMessage
+from ..circuit_breaker import ai_circuit_breaker
+from ..agents.metrics import AI_TOKEN_CONSUMPTION
+
 
 from dotenv import load_dotenv # type: ignore
 
@@ -200,7 +203,9 @@ Previous errors from Supervisor (if any, please correct your plan):
         agent = create_react_agent(llm, tools)
 
         # Run autonomous tool-calling loop
-        result = await agent.ainvoke({"messages": messages})
+
+        AI_TOKEN_CONSUMPTION.labels(model="claude-3-5-sonnet").inc(1)
+        result = await ai_circuit_breaker.call(agent.ainvoke, {"messages": messages})
         final_messages = result["messages"]
 
         # Now that tool usage is done, force structured output
