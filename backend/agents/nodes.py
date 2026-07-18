@@ -56,7 +56,7 @@ async def log_agent(node_name: str, message: str):
     except Exception as e:
         logger.error(f"Failed to broadcast AGENT_LOG / AGENT_STATE_CHANGE message: {e}")
 
-async def evaluate_previous_action(state: AgentState) -> dict:
+async def evaluate_previous_action(state: AgentState) -> AgentState:
     try:
         await log_agent("evaluate_previous_action", "[RAILMIND] Checking and evaluating previous self-healing actions...")
         
@@ -148,7 +148,7 @@ async def evaluate_previous_action(state: AgentState) -> dict:
         await log_agent("evaluate_previous_action", f"[RAILMIND] [ERROR] Self-healing evaluation failed: {e}")
     return {}
 
-async def ingest_node(state: AgentState) -> dict:
+async def ingest_node(state: AgentState) -> AgentState:
     try:
         await log_agent("SCANNING", "Polling 15 trains on Indian Railways...")
         # If evaluate_previous_action already populated the raw train data, reuse it
@@ -224,14 +224,14 @@ async def ingest_node(state: AgentState) -> dict:
                 "data": train
             }))
         
-        return {"raw_train_data": live_trains, "last_api_call": datetime.utcnow().isoformat(), "railways_latency_ms": latency}
         await log_agent("ingest_node", f"[RAILMIND] Ingested {len(live_trains)} trains")
+        return {"raw_train_data": live_trains, "last_api_call": datetime.utcnow().isoformat(), "railways_latency_ms": latency}
     except Exception as e:
         logger.error(f"Error in ingest_node: {e}")
         await log_agent("ingest_node", f"[RAILMIND] [ERROR] Ingest node failed: {e}")
     return {}
 
-async def detect_node(state: AgentState) -> dict:
+async def detect_node(state: AgentState) -> AgentState:
     try:
         await log_agent("detect_node", "[RAILMIND] Running real-time anomaly detection rules...")
         anomalies: List[TrainAnomaly] = []
@@ -434,7 +434,7 @@ async def detect_cascade(anomalies: list) -> dict:
             }
     return {"is_cascade": False}
 
-async def predict_node(state: AgentState) -> dict:
+async def predict_node(state: AgentState) -> AgentState:
     try:
         await log_agent("predict_node", "[RAILMIND] Running predictive intelligence model...")
         anomalies = state.get("anomalies", [])
@@ -741,7 +741,7 @@ async def execute_tool(tool_name: str, params: dict, reason: str, state: AgentSt
         summary = params.get("incident_summary") or reason
         await log_agent("reason_node", f"[TOOL SUCCESS] Incident escalated to Central Control Room: {summary}")
 
-async def reason_node(state: AgentState) -> dict:
+async def reason_node(state: AgentState) -> AgentState:
     try:
         anomalies = state.get("anomalies", [])
         if not anomalies:
@@ -805,7 +805,7 @@ async def reason_node(state: AgentState) -> dict:
 
 from .routing import dijkstra_route_discovery
 
-async def reroute_node(state: AgentState) -> dict:
+async def reroute_node(state: AgentState) -> AgentState:
     try:
         await log_agent("reroute_node", "[RAILMIND] Checking and resolving rerouting options...")
         anomalies = state.get("anomalies", [])
@@ -854,7 +854,7 @@ async def reroute_node(state: AgentState) -> dict:
         await log_agent("reroute_node", f"[RAILMIND] [ERROR] Reroute node failed: {e}")
     return {}
 
-async def coordination_node(state: AgentState) -> dict:
+async def coordination_node(state: AgentState) -> AgentState:
     try:
         await log_agent("coordination_node", "[RAILMIND] Initiating department task dispatches...")
         claude_json = state.get("claude_reasoning", "{}")
@@ -960,7 +960,7 @@ async def coordination_node(state: AgentState) -> dict:
         await log_agent("coordination_node", f"[RAILMIND] [ERROR] Coordination node failed: {e}")
     return {}
 
-async def alert_node(state: AgentState) -> dict:
+async def alert_node(state: AgentState) -> AgentState:
     try:
         await log_agent("alert_node", "[RAILMIND] Sending Twilio notifications...")
         m_phone = os.getenv("MAINTENANCE_PHONE", "+1234567891")
@@ -1027,7 +1027,7 @@ async def save_incident_if_not_duplicate(incident):
     print(f"[RAILMIND] New incident saved: {incident['incident_title']}")
     return True
 
-async def report_node(state: AgentState) -> dict:
+async def report_node(state: AgentState) -> AgentState:
     try:
         await log_agent("report_node", "[RAILMIND] Broadcasting operations report...")
         
