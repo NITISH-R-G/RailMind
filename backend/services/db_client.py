@@ -16,7 +16,7 @@ load_dotenv(dotenv_path=env_path)
 
 # Real MongoDB Atlas Connection for RailMind
 MONGODB_URI = os.getenv("MONGODB_URI")
-client = AsyncIOMotorClient(MONGODB_URI, maxPoolSize=50)
+client = AsyncIOMotorClient(MONGODB_URI, maxPoolSize=50, minPoolSize=10)
 db = client["railmind"]
 
 # Collections needed:
@@ -70,8 +70,10 @@ class FallbackDB:
 
     async def init_indexes(self):
         try:
-            # Create a 2dsphere index for geospatial locations if applicable, or just compound
-            await self.db["incidents"].create_index([("train_number", ASCENDING), ("timestamp", DESCENDING)], unique=True)
+            # Enforce 2dsphere index on location_geo
+            await self.db["incidents"].create_index([("location_geo", "2dsphere")])
+            # Compound index for idempotency
+            await self.db["incidents"].create_index([("train_number", ASCENDING), ("timestamp_window", DESCENDING)], unique=True)
             logger.info("MongoDB indexes created successfully.")
         except Exception as e:
             logger.warning(f"Failed to create indexes: {e}")
@@ -150,12 +152,35 @@ class FallbackDB:
             return False
 
     async def insert_incident(self, incident):
+        # Inject timestamp_window and location_geo for idempotent 2dsphere queries
+        if "timestamp" in incident:
+            ts = incident["timestamp"]
+            if isinstance(ts, str):
+                try:
+                    dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                except ValueError:
+                    dt = datetime.utcnow()
+            elif isinstance(ts, datetime):
+                dt = ts
+            else:
+                dt = datetime.utcnow()
+            # 5-minute bucketing
+            minute_bucket = (dt.minute // 5) * 5
+            timestamp_window = dt.replace(minute=minute_bucket, second=0, microsecond=0).isoformat()
+            incident["timestamp_window"] = timestamp_window
+
+        if "lat" in incident and "lng" in incident:
+            incident["location_geo"] = {
+                "type": "Point",
+                "coordinates": [float(incident["lng"]), float(incident["lat"])]
+            }
+
         if not self.use_fallback:
             try:
                 await self.db["incidents"].insert_one(incident.copy())
                 return True
             except DuplicateKeyError:
-                logger.info(f"Duplicate incident detected for train {incident.get('train_number')} at {incident.get('timestamp')}")
+                logger.info(f"Duplicate incident detected for train {incident.get('train_number')} at window {incident.get('timestamp_window')}")
                 return False
             except Exception as e:
                 logger.warning(f"MongoDB insert_incident failed: {e}. Falling back.")

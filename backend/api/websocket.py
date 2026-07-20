@@ -24,12 +24,20 @@ class ConnectionManager:
         self.MAX_CONNECTIONS = 1000
 
     async def connect(self, websocket: WebSocket):
-        if len(self.active_connections) >= self.MAX_CONNECTIONS:
-            logger.warning("WebSocket connection limit reached. Rejecting connection.")
+        global_connections = await self.redis.incr("global_active_connections")
+        if global_connections > self.MAX_CONNECTIONS:
+            logger.warning("Global WebSocket connection limit reached. Rejecting connection.")
+            await self.redis.decr("global_active_connections")
             await websocket.close(code=1008, reason="Connection limit exceeded")
             return False
 
-        await websocket.accept()
+        try:
+            await websocket.accept()
+        except Exception as e:
+            logger.error(f"WebSocket handshake failed: {e}")
+            await self.redis.decr("global_active_connections")
+            return False
+
         self.active_connections.append(websocket)
 
         # Start the listener task if it's not already running
@@ -45,22 +53,14 @@ class ConnectionManager:
     def disconnect(self, websocket: WebSocket):
         if websocket in self.active_connections:
             self.active_connections.remove(websocket)
+            asyncio.create_task(self.redis.decr("global_active_connections"))
 
     async def broadcast(self, message: str):
-        # Publish to Redis instead of sending directly to active_connections
+        # Publish to Redis exclusively
         try:
             await self.redis.publish(self.channel, message)
         except Exception as e:
-            logger.error(f"Error publishing to Redis: {e}. Falling back to direct connection broadcasting.")
-            failed_connections = []
-            for connection in self.active_connections:
-                try:
-                    await connection.send_text(message)
-                except Exception as ex:
-                    logger.error(f"Error sending directly to client: {ex}")
-                    failed_connections.append(connection)
-            for connection in failed_connections:
-                self.disconnect(connection)
+            logger.error(f"Error publishing to Redis: {e}")
 
     async def _listen_to_redis(self):
         while True:
@@ -102,15 +102,19 @@ async def websocket_endpoint(websocket: WebSocket):
         return
     try:
         while True:
-            # Add ping-pong heartbeats
             data = await websocket.receive_text()
             if data == "PING" or data == "PING_TEST":
-                await websocket.send_json({"type": "echo", "received": data})
+                await websocket.send_text("PONG")
+            elif data == "SYNC_STATE":
+                await websocket.send_json({"type": "state_recovery_ack", "message": "State synchronized"})
             else:
-                await websocket.send_json({
-                    "type": "echo",
-                    "received": data
-                })
+                # Handle unexpected texts appropriately
+                try:
+                    payload = json.loads(data)
+                    if payload.get("type") == "SYNC_STATE":
+                        await websocket.send_json({"type": "state_recovery_ack", "message": "State synchronized"})
+                except json.JSONDecodeError:
+                    pass
     except WebSocketDisconnect:
         websocket_manager.disconnect(websocket)
     except Exception as e:
