@@ -16,6 +16,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from ..services.db_client import db_client
 
+def handle_api_exception(e: Exception):
+    import logging
+    logging.error(f"API Error: {e}")
+    raise HTTPException(status_code=500, detail="Internal Server Error")
+
+
 security = HTTPBasic()
 
 def verify_admin(credentials: HTTPBasicCredentials = Depends(security)):
@@ -241,10 +247,8 @@ async def resolve_task_api(id: str):
     try:
         modified_count = await db_client.resolve_department_task(id)
         return {"status": "resolved", "modified_count": modified_count}
-    except RuntimeError as e:
-        raise HTTPException(status_code=500, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=500, detail="Internal Server Error")
+        handle_api_exception(e)
 
 # REST Endpoint: POST /api/incidents/{id}/approve - Approve reroute plan
 @app.post("/api/incidents/{id}/approve")
@@ -252,10 +256,8 @@ async def approve_incident_api(id: str, admin: str = Depends(verify_admin)):
     try:
         modified_count = await db_client.approve_incident(id)
         return {"status": "approved", "modified_count": modified_count}
-    except RuntimeError as e:
-        raise HTTPException(status_code=500, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=500, detail="Internal Server Error")
+        handle_api_exception(e)
 
 # REST Endpoint: GET /api/system-status -> returns all system statuses
 @app.get("/api/system-status")
@@ -414,7 +416,5 @@ async def ingest_telemetry(payload: TelemetryPayload, request: Request):
             raise RuntimeError("Redis pool not initialized")
         await redis.enqueue_job("process_train_telemetry", payload.train_numbers)
         return {"status": "enqueued", "train_numbers": payload.train_numbers}
-    except RuntimeError as e:
-        raise HTTPException(status_code=500, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=500, detail="Internal Server Error")
+        handle_api_exception(e)

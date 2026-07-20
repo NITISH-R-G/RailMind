@@ -33,7 +33,7 @@ class ConnectionManager:
 
         try:
             await websocket.accept()
-        except (WebSocketDisconnect, RuntimeError) as e:
+        except RuntimeError as e:
             logger.error(f"WebSocket handshake failed: {e}")
             await self.redis.decr("global_active_connections")
             return False
