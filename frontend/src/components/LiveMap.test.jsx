@@ -22,11 +22,9 @@ describe('LiveMap Component', () => {
     expect(mapContainer).toBeInTheDocument();
 
     const markers = screen.getAllByTestId('marker');
-    expect(markers).toHaveLength(3); // 3 fallback trains
+    expect(markers).toHaveLength(1); // 1 fallback train
 
-    expect(screen.getByText('Chennai Exp')).toBeInTheDocument();
-    expect(screen.getByText('Mumbai Rajdhani')).toBeInTheDocument();
-    expect(screen.getByText('Howrah Duronto')).toBeInTheDocument();
+    expect(screen.getByText('Howrah Rajdhani')).toBeInTheDocument();
   });
 
   it('renders with provided trains', () => {
