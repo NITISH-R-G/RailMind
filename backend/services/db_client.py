@@ -151,19 +151,21 @@ class FallbackDB:
                         pass
             return False
 
+
+    def _parse_timestamp(self, ts):
+        if isinstance(ts, str):
+            try:
+                return datetime.fromisoformat(ts.replace("Z", "+00:00"))
+            except ValueError:
+                pass
+        elif isinstance(ts, datetime):
+            return ts
+        return datetime.now(timezone.utc)
+
     async def insert_incident(self, incident):
         # Inject timestamp_window and location_geo for idempotent 2dsphere queries
         if "timestamp" in incident:
-            ts = incident["timestamp"]
-            if isinstance(ts, str):
-                try:
-                    dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
-                except ValueError:
-                    dt = datetime.now(timezone.utc)
-            elif isinstance(ts, datetime):
-                dt = ts
-            else:
-                dt = datetime.now(timezone.utc)
+            dt = self._parse_timestamp(incident["timestamp"])
             # 5-minute bucketing
             minute_bucket = (dt.minute // 5) * 5
             timestamp_window = dt.replace(minute=minute_bucket, second=0, microsecond=0).isoformat()

@@ -241,8 +241,10 @@ async def resolve_task_api(id: str):
     try:
         modified_count = await db_client.resolve_department_task(id)
         return {"status": "resolved", "modified_count": modified_count}
-    except Exception as e:
+    except RuntimeError as e:
         raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="Internal Server Error")
 
 # REST Endpoint: POST /api/incidents/{id}/approve - Approve reroute plan
 @app.post("/api/incidents/{id}/approve")
@@ -250,8 +252,10 @@ async def approve_incident_api(id: str, admin: str = Depends(verify_admin)):
     try:
         modified_count = await db_client.approve_incident(id)
         return {"status": "approved", "modified_count": modified_count}
-    except Exception as e:
+    except RuntimeError as e:
         raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="Internal Server Error")
 
 # REST Endpoint: GET /api/system-status -> returns all system statuses
 @app.get("/api/system-status")
@@ -407,8 +411,10 @@ async def ingest_telemetry(payload: TelemetryPayload, request: Request):
     try:
         redis = getattr(request.app.state, "redis_pool", None)
         if not redis:
-            raise Exception("Redis pool not initialized")
+            raise RuntimeError("Redis pool not initialized")
         await redis.enqueue_job("process_train_telemetry", payload.train_numbers)
         return {"status": "enqueued", "train_numbers": payload.train_numbers}
-    except Exception as e:
+    except RuntimeError as e:
         raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="Internal Server Error")
