@@ -5,7 +5,7 @@ import traceback
 from dotenv import load_dotenv
 from typing import Dict, Any, List
 from uuid import uuid4
-from datetime import datetime
+from datetime import datetime, timezone, timezone
 from ..services.ai_service import reason_with_ai
 from .state import AgentState, TrainAnomaly, DepartmentTask
 from ..services.db_client import db_client
@@ -44,11 +44,11 @@ async def log_agent(node_name: str, message: str):
         await websocket_manager.broadcast(json.dumps({
             "type": "AGENT_STATE_CHANGE",
             "state": node_name,
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.now(timezone.utc).isoformat()
         }))
         await websocket_manager.broadcast(json.dumps({
             "type": "AGENT_LOG",
-            "timestamp": datetime.utcnow().strftime('%H:%M:%S'),
+            "timestamp": datetime.now(timezone.utc).strftime('%H:%M:%S'),
             "node": node_name,
             "level": level,
             "message": message
@@ -102,7 +102,7 @@ async def evaluate_previous_action(state: AgentState) -> AgentState:
                     "lng": 78.9629
                 })
             state["raw_train_data"] = live_trains
-            state["last_api_call"] = datetime.utcnow().isoformat()
+            state["last_api_call"] = datetime.now(timezone.utc).isoformat()
             state["railways_latency_ms"] = int((time.time() - start_time) * 1000)
 
         # Evaluate pending incidents
@@ -195,7 +195,7 @@ async def ingest_node(state: AgentState) -> AgentState:
             results = train_results
             
             latency = int((time.time() - start_time) * 1000)
-            state["last_api_call"] = datetime.utcnow().isoformat()
+            state["last_api_call"] = datetime.now(timezone.utc).isoformat()
             state["railways_latency_ms"] = latency
             
             print(f"[RAILMIND] API returned {len(results)} trains")
@@ -447,7 +447,7 @@ async def predict_node(state: AgentState) -> AgentState:
             
         predict_prompt = f"""
         Current delayed trains: {json.dumps(anomalies)}
-        Time: {datetime.utcnow().strftime("%H:%M")}
+        Time: {datetime.now(timezone.utc).strftime("%H:%M")}
         
         PREDICT the next 30 minutes:
         1. Which currently on-time trains will be affected 
@@ -496,11 +496,11 @@ async def broadcast_log(stage: str, message: str):
         await websocket_manager.broadcast(json.dumps({
             "type": "AGENT_STATE_CHANGE",
             "state": stage,
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.now(timezone.utc).isoformat()
         }))
         await websocket_manager.broadcast(json.dumps({
             "type": "AGENT_LOG",
-            "timestamp": datetime.utcnow().strftime('%H:%M:%S'),
+            "timestamp": datetime.now(timezone.utc).strftime('%H:%M:%S'),
             "node": "reason_node",
             "level": level,
             "message": message
@@ -683,7 +683,7 @@ async def execute_tool(tool_name: str, params: dict, reason: str, state: AgentSt
             "urgency": urgency,
             "action_required": "Emergency dispatch action",
             "status": "pending",
-            "timestamp": datetime.utcnow()
+            "timestamp": datetime.now(timezone.utc)
         }
         try:
             await db_client.insert_department_tasks([mongo_task])
@@ -1048,7 +1048,7 @@ async def coordination_node(state: AgentState) -> AgentState:
                 "urgency": task["urgency"],
                 "action_required": task["action_required"],
                 "status": "pending",
-                "timestamp": datetime.utcnow()
+                "timestamp": datetime.now(timezone.utc)
             })
 
         try:
@@ -1217,7 +1217,7 @@ async def report_node(state: AgentState) -> AgentState:
             at_risk_count = len(pred.get("at_risk_trains", [])) or 3
             future_time = "14:30"
             try:
-                ts_str = state.get("last_api_call") or datetime.utcnow().isoformat()
+                ts_str = state.get("last_api_call") or datetime.now(timezone.utc).isoformat()
                 from datetime import timedelta
                 dt = datetime.fromisoformat(str(ts_str))
                 future_dt = dt + timedelta(minutes=30)
@@ -1229,7 +1229,7 @@ async def report_node(state: AgentState) -> AgentState:
         incident_report = {
             "incident_id": incident_id,
             "loop_created": state.get("loop_count", 0),
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "train_number": train_number,
             "train_name": train_name,
             "incident_title": cascade_title or f"{train_number} {train_name} delayed {delay_minutes}min at {current_station}",

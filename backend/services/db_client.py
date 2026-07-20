@@ -1,7 +1,7 @@
 import os
 import json
 import asyncio
-from datetime import datetime
+from datetime import datetime, timezone, timezone
 from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo.errors import DuplicateKeyError
 from pymongo import IndexModel, ASCENDING, DESCENDING # type: ignore
@@ -114,8 +114,8 @@ class FallbackDB:
         await asyncio.to_thread(self._sync_write_fallback, data)
 
     async def has_recent_incident(self, train_number, minutes=2):
-        from datetime import datetime, timedelta
-        cutoff = datetime.utcnow() - timedelta(minutes=minutes)
+        from datetime import datetime, timezone, timezone, timedelta
+        cutoff = datetime.now(timezone.utc) - timedelta(minutes=minutes)
         
         if not self.use_fallback:
             try:
@@ -159,11 +159,11 @@ class FallbackDB:
                 try:
                     dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
                 except ValueError:
-                    dt = datetime.utcnow()
+                    dt = datetime.now(timezone.utc)
             elif isinstance(ts, datetime):
                 dt = ts
             else:
-                dt = datetime.utcnow()
+                dt = datetime.now(timezone.utc)
             # 5-minute bucketing
             minute_bucket = (dt.minute // 5) * 5
             timestamp_window = dt.replace(minute=minute_bucket, second=0, microsecond=0).isoformat()
@@ -345,7 +345,7 @@ class FallbackDB:
                     "pattern": pattern,
                     "effectiveness": effectiveness,
                     "escalations": escalations,
-                    "timestamp": datetime.utcnow().isoformat()
+                    "timestamp": datetime.now(timezone.utc).isoformat()
                 }
                 await self.save_memory(memory_item)
             except Exception as e:
@@ -433,7 +433,7 @@ class FallbackDB:
                     "pattern": pattern,
                     "effectiveness": effectiveness,
                     "escalations": escalations,
-                    "timestamp": datetime.utcnow().isoformat()
+                    "timestamp": datetime.now(timezone.utc).isoformat()
                 }
                 await self.save_memory(memory_item)
             except Exception as e:

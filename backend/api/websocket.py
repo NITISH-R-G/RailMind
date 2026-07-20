@@ -53,7 +53,11 @@ class ConnectionManager:
     def disconnect(self, websocket: WebSocket):
         if websocket in self.active_connections:
             self.active_connections.remove(websocket)
-            asyncio.create_task(self.redis.decr("global_active_connections"))
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(self.redis.decr("global_active_connections"))
+            except Exception:
+                pass
 
     async def broadcast(self, message: str):
         # Publish to Redis exclusively

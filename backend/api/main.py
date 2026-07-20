@@ -1,7 +1,7 @@
 import asyncio
 import os
 import uvicorn
-from datetime import datetime
+from datetime import datetime, timezone
 from dotenv import load_dotenv
 
 # Ensure env variables are loaded before imports
@@ -43,10 +43,50 @@ from ..agents.graph import railmind_graph # type: ignore
 from ..agents.state import AgentState # type: ignore
 from ..services.railways_api import RailwaysAPIClient
 
+from contextlib import asynccontextmanager
+from arq import create_pool
+from arq.connections import RedisSettings
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Test connection on startup and clean collections:
+    try:
+        from ..services.db_client import client, db
+        await client.admin.command('ping')
+        print("[RAILMIND] MongoDB Atlas connected [OK]")
+
+        # Cleanup incidents and tasks
+        from ..services.db_client import db_client
+        await db_client.init_indexes()
+        await db.incidents.delete_many({})
+        await db.department_tasks.delete_many({})
+        print("[RAILMIND] Cleared MongoDB incidents and tasks collections [OK]")
+    except Exception as e:
+        print(f"[RAILMIND] MongoDB connection/cleanup failed: {e}")
+
+    # Initialize ARQ redis pool
+    try:
+        redis_host = os.getenv("REDIS_HOST", "localhost")
+        app.state.redis_pool = await create_pool(RedisSettings(host=redis_host, port=6379))
+        print("[RAILMIND] ARQ Redis Pool connected [OK]")
+    except Exception as e:
+        print(f"[RAILMIND] ARQ Redis Pool connection failed: {e}")
+
+    yield
+
+    try:
+        if hasattr(app.state, "redis_pool"):
+            app.state.redis_pool.close()
+            await app.state.redis_pool.wait_closed()
+            print("[RAILMIND] ARQ Redis Pool closed [OK]")
+    except Exception as e:
+        print(f"[RAILMIND] ARQ Redis Pool close failed: {e}")
+
 app = FastAPI(
     title="RailMind Operations API",
     description="Autonomous railway operations intelligence agent API",
-    version="0.1.0"
+    version="0.1.0",
+    lifespan=lifespan
 )
 
 # CORS middleware configuration
@@ -82,8 +122,10 @@ latest_agent_state = {
 
 
 
-@app.on_event("startup")
-async def startup_event():
+from contextlib import asynccontextmanager
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
     # Test connection on startup and clean collections:
     try:
         from ..services.db_client import client, db
@@ -106,8 +148,8 @@ async def startup_event():
     except Exception as e:
         print(f"[RAILMIND] ARQ Redis Pool connection failed: {e}")
 
-@app.on_event("shutdown")
-async def shutdown_event():
+    yield
+
     try:
         if hasattr(app.state, "redis_pool"):
             app.state.redis_pool.close()
@@ -130,13 +172,13 @@ async def ws_endpoint(websocket: WebSocket):
 @app.get("/api/incidents")
 async def get_incidents_api(all: bool = False):
     try:
-        from datetime import datetime, timedelta
+        from datetime import datetime, timezone, timedelta
         # Fetch up to 1000 incidents
         incidents = await db_client.get_incidents(limit=1000)
         if all:
             return incidents
             
-        cutoff = datetime.utcnow() - timedelta(hours=24)
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
         filtered = []
         for inc in incidents:
             ts_str = inc.get("timestamp")
@@ -147,8 +189,8 @@ async def get_incidents_api(all: bool = False):
                     ts = ts_str
                 else:
                     ts = datetime.fromisoformat(str(ts_str).replace("Z", "+00:00"))
-                if ts.tzinfo is not None:
-                    ts = ts.replace(tzinfo=None)
+                if ts.tzinfo is None:
+                    ts = ts.replace(tzinfo=timezone.utc)
                 if ts >= cutoff:
                     filtered.append(inc)
             except Exception:
@@ -361,9 +403,9 @@ class TelemetryPayload(BaseModel):
     train_numbers: list[str]
 
 @app.post("/api/telemetry/ingest")
-async def ingest_telemetry(payload: TelemetryPayload):
+async def ingest_telemetry(payload: TelemetryPayload, request: Request):
     try:
-        redis = getattr(app.state, "redis_pool", None)
+        redis = getattr(request.app.state, "redis_pool", None)
         if not redis:
             raise Exception("Redis pool not initialized")
         await redis.enqueue_job("process_train_telemetry", payload.train_numbers)
