@@ -1,7 +1,7 @@
 import asyncio
 import os
 import uvicorn
-from datetime import datetime
+from datetime import datetime, timezone
 from dotenv import load_dotenv
 
 # Ensure env variables are loaded before imports
@@ -9,10 +9,18 @@ env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__
 load_dotenv(dotenv_path=env_path)
 
 import secrets
-from fastapi import FastAPI, WebSocket, HTTPException, Depends, status
+from fastapi import FastAPI, WebSocket, HTTPException, Depends, status, Request
+from pydantic import BaseModel
+import redis.asyncio as redis
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from ..services.db_client import db_client
+
+def handle_api_exception(e: Exception):
+    import logging
+    logging.error(f"API Error: {e}")
+    raise HTTPException(status_code=500, detail="Internal Server Error")
+
 
 security = HTTPBasic()
 
@@ -41,10 +49,50 @@ from ..agents.graph import railmind_graph # type: ignore
 from ..agents.state import AgentState # type: ignore
 from ..services.railways_api import RailwaysAPIClient
 
+from contextlib import asynccontextmanager
+from arq import create_pool
+from arq.connections import RedisSettings
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Test connection on startup and clean collections:
+    try:
+        from ..services.db_client import client, db
+        await client.admin.command('ping')
+        print("[RAILMIND] MongoDB Atlas connected [OK]")
+
+        # Cleanup incidents and tasks
+        from ..services.db_client import db_client
+        await db_client.init_indexes()
+        await db.incidents.delete_many({})
+        await db.department_tasks.delete_many({})
+        print("[RAILMIND] Cleared MongoDB incidents and tasks collections [OK]")
+    except Exception as e:
+        print(f"[RAILMIND] MongoDB connection/cleanup failed: {e}")
+
+    # Initialize ARQ redis pool
+    try:
+        redis_host = os.getenv("REDIS_HOST", "localhost")
+        app.state.redis_pool = await create_pool(RedisSettings(host=redis_host, port=6379))
+        print("[RAILMIND] ARQ Redis Pool connected [OK]")
+    except Exception as e:
+        print(f"[RAILMIND] ARQ Redis Pool connection failed: {e}")
+
+    yield
+
+    try:
+        if hasattr(app.state, "redis_pool"):
+            app.state.redis_pool.close()
+            await app.state.redis_pool.wait_closed()
+            print("[RAILMIND] ARQ Redis Pool closed [OK]")
+    except Exception as e:
+        print(f"[RAILMIND] ARQ Redis Pool close failed: {e}")
+
 app = FastAPI(
     title="RailMind Operations API",
     description="Autonomous railway operations intelligence agent API",
-    version="0.1.0"
+    version="0.1.0",
+    lifespan=lifespan
 )
 
 # CORS middleware configuration
@@ -78,66 +126,12 @@ latest_agent_state = {
 }
 
 
-async def run_agent_loop_fallback():
-    from ..agents.graph import railmind_graph
-    from ..agents.state import AgentState
-    import uuid
-    train_numbers = [
-        "12301", "12951", "12001", "12259", "12565",
-        "11057", "12627", "12625", "12621", "12615",
-        "12309", "12721", "12229", "12311", "12641"
-    ]
-    processed_trains = []
-    
-    # Wait a few seconds for startup to settle
-    await asyncio.sleep(5)
-    
-    while True:
-        try:
-            print("[RAILMIND] Local background agent loop run starting...")
-            initial_state = AgentState(
-                raw_train_data=[],
-                anomalies=[],
-                claude_reasoning="",
-                reroute_plan=None,
-                department_tasks=[],
-                sms_alerts_sent=[],
-                incident_report=None,
-                loop_count=0,
-                should_continue=False,
-                last_api_call="Never",
-                railways_latency_ms=0,
-                ai_latency_ms=0,
-                processed_trains=processed_trains,
-                target_trains=train_numbers
-            )
-            thread_id = f"local_bg_{uuid.uuid4().hex[:8]}"
-            config = {"configurable": {"thread_id": thread_id}, "recursion_limit": 20}
-            result = await railmind_graph.ainvoke(initial_state, config)
-            if result:
-                processed_trains = result.get("processed_trains", [])
-                latest_agent_state.update({
-                    "raw_train_data": result.get("raw_train_data", []),
-                    "anomalies": result.get("anomalies", []),
-                    "claude_reasoning": result.get("claude_reasoning", ""),
-                    "reroute_plan": result.get("reroute_plan"),
-                    "department_tasks": result.get("department_tasks", []),
-                    "sms_alerts_sent": result.get("sms_alerts_sent", []),
-                    "incident_report": result.get("incident_report"),
-                    "loop_count": result.get("loop_count", 0),
-                    "should_continue": result.get("should_continue", False),
-                    "last_api_call": result.get("last_api_call", "Never"),
-                    "railways_latency_ms": result.get("railways_latency_ms", 0),
-                    "ai_latency_ms": result.get("ai_latency_ms", 0),
-                    "processed_trains": processed_trains
-                })
-            print("[RAILMIND] Local background agent loop run completed.")
-        except Exception as e:
-            print(f"[RAILMIND] Local background agent loop failed: {e}")
-        await asyncio.sleep(60)
 
-@app.on_event("startup")
-async def startup_event():
+
+from contextlib import asynccontextmanager
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
     # Test connection on startup and clean collections:
     try:
         from ..services.db_client import client, db
@@ -152,8 +146,25 @@ async def startup_event():
     except Exception as e:
         print(f"[RAILMIND] MongoDB connection/cleanup failed: {e}")
 
-    # Run the agent workflow loop asynchronously in the background on API startup
-    asyncio.create_task(run_agent_loop_fallback())
+    # Initialize ARQ redis pool
+    try:
+        redis_host = os.getenv("REDIS_HOST", "localhost")
+        app.state.redis_pool = await create_pool(RedisSettings(host=redis_host, port=6379))
+        print("[RAILMIND] ARQ Redis Pool connected [OK]")
+    except Exception as e:
+        print(f"[RAILMIND] ARQ Redis Pool connection failed: {e}")
+
+    yield
+
+    try:
+        if hasattr(app.state, "redis_pool"):
+            app.state.redis_pool.close()
+            await app.state.redis_pool.wait_closed()
+            print("[RAILMIND] ARQ Redis Pool closed [OK]")
+    except Exception as e:
+        print(f"[RAILMIND] ARQ Redis Pool close failed: {e}")
+
+
 
 # Include general REST routers
 app.include_router(router, prefix="/api")
@@ -167,13 +178,13 @@ async def ws_endpoint(websocket: WebSocket):
 @app.get("/api/incidents")
 async def get_incidents_api(all: bool = False):
     try:
-        from datetime import datetime, timedelta
+        from datetime import datetime, timezone, timedelta
         # Fetch up to 1000 incidents
         incidents = await db_client.get_incidents(limit=1000)
         if all:
             return incidents
             
-        cutoff = datetime.utcnow() - timedelta(hours=24)
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
         filtered = []
         for inc in incidents:
             ts_str = inc.get("timestamp")
@@ -184,8 +195,8 @@ async def get_incidents_api(all: bool = False):
                     ts = ts_str
                 else:
                     ts = datetime.fromisoformat(str(ts_str).replace("Z", "+00:00"))
-                if ts.tzinfo is not None:
-                    ts = ts.replace(tzinfo=None)
+                if ts.tzinfo is None:
+                    ts = ts.replace(tzinfo=timezone.utc)
                 if ts >= cutoff:
                     filtered.append(inc)
             except Exception:
@@ -237,7 +248,7 @@ async def resolve_task_api(id: str):
         modified_count = await db_client.resolve_department_task(id)
         return {"status": "resolved", "modified_count": modified_count}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        handle_api_exception(e)
 
 # REST Endpoint: POST /api/incidents/{id}/approve - Approve reroute plan
 @app.post("/api/incidents/{id}/approve")
@@ -246,7 +257,7 @@ async def approve_incident_api(id: str, admin: str = Depends(verify_admin)):
         modified_count = await db_client.approve_incident(id)
         return {"status": "approved", "modified_count": modified_count}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        handle_api_exception(e)
 
 # REST Endpoint: GET /api/system-status -> returns all system statuses
 @app.get("/api/system-status")
@@ -390,3 +401,20 @@ async def reset_simulation_api():
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+
+from arq import create_pool
+from arq.connections import RedisSettings
+
+class TelemetryPayload(BaseModel):
+    train_numbers: list[str]
+
+@app.post("/api/telemetry/ingest")
+async def ingest_telemetry(payload: TelemetryPayload, request: Request):
+    try:
+        redis = getattr(request.app.state, "redis_pool", None)
+        if not redis:
+            raise RuntimeError("Redis pool not initialized")
+        await redis.enqueue_job("process_train_telemetry", payload.train_numbers)
+        return {"status": "enqueued", "train_numbers": payload.train_numbers}
+    except Exception as e:
+        handle_api_exception(e)
