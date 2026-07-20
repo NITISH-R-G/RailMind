@@ -7,6 +7,8 @@ import IncidentFeed from './components/IncidentFeed';
 import TaskBoard from './components/TaskBoard';
 import RouteIntelligence from './components/RouteIntelligence';
 import { ShieldAlert, AlertTriangle, Info, Check, CornerDownRight, Terminal, RefreshCw, X, Shield, User, HelpCircle, Activity, Bell, Settings } from 'lucide-react';
+import useStore from './store';
+import { List } from 'react-window';
 
 class ErrorBoundary extends React.Component {
   constructor(props) {
@@ -63,13 +65,14 @@ class ErrorBoundary extends React.Component {
 
 function MainApp() {
   const [activeTab, setActiveTab] = useState('Dashboard');
-  const [loopCount, setLoopCount] = useState(0);
-  const [incidentCount, setIncidentCount] = useState(0);
-  const [incidents, setIncidents] = useState([]);
-  const [tasks, setTasks] = useState([]);
-  const [trains, setTrains] = useState([]);
-  const [wsStatus, setWsStatus] = useState('reconnecting');
-  const [logs, setLogs] = useState([]);
+
+  const {
+    trains, incidents, tasks, logs, wsStatus, loopCount,
+    setTrains, setIncidents, setTasks, addLog, addIncident,
+    setWsStatus, setLoopCount, updateTaskStatus, updateIncidentApproval, removeIncident
+  } = useStore();
+
+  const incidentCount = incidents.length;
   
   // Modal Overlay States
   const [showSettings, setShowSettings] = useState(false);
@@ -129,7 +132,6 @@ function MainApp() {
           train_number: inc.train_number || 'Unknown'
         }));
         setIncidents(formatted);
-        setIncidentCount(formatted.length);
       }
     } catch (err) {
       console.error("[API] Failed to fetch incidents:", err);
@@ -207,11 +209,7 @@ function MainApp() {
               train_number: report.train_number || 'Unknown'
             };
 
-            setIncidents(prev => {
-              if (prev.some(inc => inc.id === newIncident.id)) return prev;
-              return [newIncident, ...prev];
-            });
-            setIncidentCount(prev => prev + 1);
+            addIncident(newIncident);
             if (report.loop_count !== undefined) {
               setLoopCount(report.loop_count);
             }
@@ -219,7 +217,7 @@ function MainApp() {
             fetchTasks();
             fetchTrains();
           } else if (payload.type === 'AGENT_LOG') {
-            setLogs(prev => [...prev, payload].slice(-200)); // Keep last 200 logs
+            addLog(payload);
           }
         } catch (err) {
           console.error("[WEBSOCKET] Error parsing socket data:", err);
@@ -261,12 +259,7 @@ function MainApp() {
         headers: headers
       });
       if (res.ok) {
-        setIncidents(prev => prev.map(inc => {
-          if (inc.id === incidentId) {
-            return { ...inc, approved: true };
-          }
-          return inc;
-        }));
+        updateIncidentApproval(incidentId, true);
       } else if (res.status === 401) {
         alert("Incorrect admin password.");
         console.error("Unauthorized: Incorrect admin password.");
@@ -280,8 +273,7 @@ function MainApp() {
 
   const handleAcknowledge = (incidentId) => {
     console.log(`Acknowledging warning incident: ${incidentId}`);
-    setIncidents(prev => prev.filter(inc => inc.id !== incidentId));
-    setIncidentCount(prev => Math.max(0, prev - 1));
+    removeIncident(incidentId);
   };
 
   const handleResolve = async (taskId) => {
@@ -291,12 +283,7 @@ function MainApp() {
         method: 'POST'
       });
       if (res.ok) {
-        setTasks(prev => prev.map(t => {
-          if (t._id === taskId || t.id === taskId) {
-            return { ...t, status: 'resolved', urgency: 'resolved' };
-          }
-          return t;
-        }));
+        updateTaskStatus(taskId, 'resolved');
       } else {
         console.error("Failed to mark task resolved on API server");
       }
@@ -616,20 +603,31 @@ function MainApp() {
   };
 
   const LogsView = ({ logs = [], onClear }) => {
-    const logEndRef = useRef(null);
+    const listRef = useRef();
 
     useEffect(() => {
-      if (logEndRef.current) {
-        logEndRef.current.scrollIntoView({ behavior: 'smooth' });
+      if (listRef.current && logs.length > 0) {
+        listRef.current.scrollToItem(logs.length - 1, "end");
       }
-    }, [logs]);
+    }, [logs.length]);
+
+    const Row = ({ index, style }) => {
+      const log = logs[index];
+      return (
+        <div style={{ ...style, lineBreak: 'anywhere' }}>
+          <span style={{ color: '#FFB000' }}>{log.message.substring(0, 21)}</span>
+          <span style={{ color: '#00FF66' }}>{log.message.substring(21, 35)}</span>
+          <span style={{ color: '#e2e8f0' }}>{log.message.substring(35)}</span>
+        </div>
+      );
+    };
 
     return (
       <div style={{ padding: '24px', flex: 1, display: 'flex', flexDirection: 'column', gap: '16px', height: '100%' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div>
             <h2 className="palantir-mono" style={{ fontSize: '18px', fontWeight: 600, color: '#f8fafc', display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <Terminal size={20} style={{ color: '#00f0ff' }} />
+              <Terminal size={20} style={{ color: '#00FF66' }} />
               COGNITIVE OPERATIONS STREAM
             </h2>
             <p className="palantir-mono" style={{ fontSize: '11px', color: '#5c7080' }}>REAL-TIME AGENT STATE MACHINE TRACE</p>
@@ -640,7 +638,7 @@ function MainApp() {
             style={{
               padding: '6px 12px',
               backgroundColor: 'transparent',
-              border: '1px solid #1a2433',
+              border: '1px solid #26354A',
               borderRadius: '0px',
               color: '#8a9ba8',
               fontSize: '10px',
@@ -649,13 +647,13 @@ function MainApp() {
               transition: 'all 0.2s'
             }}
             onMouseEnter={e => {
-              e.currentTarget.style.backgroundColor = '#17202b';
-              e.currentTarget.style.borderColor = '#00f0ff';
+              e.currentTarget.style.backgroundColor = '#161F30';
+              e.currentTarget.style.borderColor = '#00FF66';
               e.currentTarget.style.color = '#e2e8f0';
             }}
             onMouseLeave={e => {
               e.currentTarget.style.backgroundColor = 'transparent';
-              e.currentTarget.style.borderColor = '#1a2433';
+              e.currentTarget.style.borderColor = '#26354A';
               e.currentTarget.style.color = '#8a9ba8';
             }}
           >
@@ -665,17 +663,16 @@ function MainApp() {
 
         <div style={{
           flex: 1,
-          backgroundColor: '#05070a',
-          border: '1px solid #1a2433',
+          backgroundColor: '#0A0E17',
+          border: '1px solid #26354A',
           borderRadius: '0px',
           padding: '20px',
-          overflowY: 'auto',
+          overflow: 'hidden',
           display: 'flex',
           flexDirection: 'column',
-          gap: '8px',
           fontFamily: "'JetBrains Mono', monospace",
           fontSize: '11px',
-          color: '#00f0ff',
+          color: '#00FF66',
           boxShadow: 'inset 0 2px 10px rgba(0,0,0,0.8)'
         }}>
           {logs.length === 0 ? (
@@ -683,15 +680,16 @@ function MainApp() {
               [SYSTEM] Awaiting live logs from operations agent stream...
             </div>
           ) : (
-            logs.map((log, idx) => (
-              <div key={idx} style={{ lineBreak: 'anywhere' }}>
-                <span style={{ color: '#ffb300' }}>{log.message.substring(0, 21)}</span>
-                <span style={{ color: '#00f0ff' }}>{log.message.substring(21, 35)}</span>
-                <span style={{ color: '#e2e8f0' }}>{log.message.substring(35)}</span>
-              </div>
-            ))
+            <List
+              ref={listRef}
+              height={window.innerHeight - 200}
+              itemCount={logs.length}
+              itemSize={24}
+              width="100%"
+            >
+              {Row}
+            </List>
           )}
-          <div ref={logEndRef}></div>
         </div>
       </div>
     );
@@ -1213,24 +1211,57 @@ function MainApp() {
     switch (activeTab) {
       case 'Dashboard':
         return (
-          <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'minmax(0, 2fr) minmax(0, 1fr)',
+            gridTemplateRows: 'minmax(0, 2fr) minmax(0, 1.2fr)',
+            gap: '8px',
+            padding: '8px',
+            flex: 1,
+            overflow: 'hidden',
+            backgroundColor: '#0A0E17'
+          }}>
+            {/* Panel B & D (Map) - spanning top row, left column */}
             <div style={{
-              display: 'flex',
-              flexDirection: 'column',
-              flex: 1,
-              borderRight: '1px solid #1a2433',
-              backgroundColor: '#080a0d'
+              gridColumn: '1 / 2',
+              gridRow: '1 / 2',
+              border: '1px solid #26354A',
+              backgroundColor: '#161F30',
+              position: 'relative',
+              overflow: 'hidden'
             }}>
-              <div style={{ flex: 1, position: 'relative' }}>
-                <LiveMap trains={trains} incidents={incidents} />
-              </div>
+              <LiveMap trains={trains} incidents={incidents} />
+            </div>
+
+            {/* Panel B: Critical Incident Core - Top Right */}
+            <div style={{
+              gridColumn: '2 / 3',
+              gridRow: '1 / 3',
+              border: '1px solid #26354A',
+              backgroundColor: '#161F30',
+              overflow: 'hidden',
+              display: 'flex',
+              flexDirection: 'column'
+            }}>
+              <IncidentFeed
+                incidents={incidents}
+                onApprove={handleApprove}
+                onAcknowledge={handleAcknowledge}
+              />
+            </div>
+
+            {/* Panel C: Task Synchronization - Bottom Left */}
+            <div style={{
+              gridColumn: '1 / 2',
+              gridRow: '2 / 3',
+              border: '1px solid #26354A',
+              backgroundColor: '#161F30',
+              overflow: 'hidden',
+              display: 'flex',
+              flexDirection: 'column'
+            }}>
               <TaskBoard tasks={tasks} onResolve={handleResolve} />
             </div>
-            <IncidentFeed 
-              incidents={incidents} 
-              onApprove={handleApprove}
-              onAcknowledge={handleAcknowledge}
-            />
           </div>
         );
 
@@ -1258,7 +1289,7 @@ function MainApp() {
         return <SupportView />;
 
       case 'Logs':
-        return <LogsView logs={logs} onClear={() => setLogs([])} />;
+        return <LogsView logs={logs} onClear={() => useStore.getState().setLogs([])} />;
 
       case 'Sensor Data':
         return <RouteIntelligence trains={trains} />;

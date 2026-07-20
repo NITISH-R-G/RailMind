@@ -159,21 +159,24 @@ const getDetourCoords = (planText) => {
   return coords.length >= 2 ? coords : null;
 };
 
-const createMarkerIcon = (status, delay, isSelected = false) => {
-  let color = '#00f0ff';
-  if (status === 'cancelled' || delay > 60) color = '#ff3366';
-  else if (status === 'delayed' || delay > 15) color = '#ffb300';
-  const size = isSelected ? 16 : 10;
-  const glow = isSelected ? `0 0 14px ${color}, 0 0 28px ${color}40` : `0 0 8px ${color}80`;
+const createMarkerIcon = (status, delay, isSelected = false, bearing = 0) => {
+  let color = '#00FF66'; // Cybernetic Green
+  if (status === 'cancelled' || delay > 60) color = '#FF3333'; // Tactical Crimson
+  else if (status === 'delayed' || delay > 15) color = '#FFB000'; // Telemetry Amber
+
+  const size = isSelected ? 24 : 16;
+  const glow = isSelected ? `drop-shadow(0 0 8px ${color}) drop-shadow(0 0 12px ${color}80)` : `drop-shadow(0 0 4px ${color})`;
+
+  // Custom SVG train marker with dynamic orientation vector
+  const svgContent = `
+    <svg viewBox="0 0 24 24" width="${size}" height="${size}" style="filter: ${glow}; transform: rotate(${bearing}deg); transition: transform 0.4s ease;">
+      <path d="M12 2L4 20h16L12 2z" fill="${color}" stroke="#161F30" stroke-width="1.5" />
+      <circle cx="12" cy="15" r="2" fill="#0A0E17" />
+    </svg>
+  `;
+
   return L.divIcon({
-    html: `<div style="
-      width:${size}px; height:${size}px;
-      background:${color};
-      border: 2px solid #fff;
-      border-radius: 50%;
-      box-shadow: ${glow};
-      transition: all 0.4s ease;
-    "></div>`,
+    html: svgContent,
     className: 'train-position-marker',
     iconSize: [size, size],
     iconAnchor: [size / 2, size / 2],
@@ -181,9 +184,9 @@ const createMarkerIcon = (status, delay, isSelected = false) => {
 };
 
 const createShockwaveIcon = (severity) => {
-  const cls = severity === 'warning' ? 'shockwave-ring warning' : 'shockwave-ring';
+  const color = severity === 'warning' ? '#FFB000' : '#FF3333';
   return L.divIcon({
-    html: `<div class="${cls}"></div>`,
+    html: `<div class="shockwave-ring" style="border-color: ${color};"></div>`,
     className: '',
     iconSize: [0, 0],
     iconAnchor: [0, 0],
@@ -191,7 +194,7 @@ const createShockwaveIcon = (severity) => {
 };
 
 // ─── Component: Animated Polyline (flowing dashes) ───────────────────────────
-function AnimatedPolyline({ positions, color = '#00f0ff', weight = 3, isDashed = false }) {
+function AnimatedPolyline({ positions, color = '#00FF66', weight = 3, isDashed = false }) {
   const map = useMap();
   const polylineRef = useRef(null);
 
@@ -370,7 +373,7 @@ export default function LiveMap({ trains = [], incidents = [] }) {
         {/* Feature A: Comet Trail Dots */}
         {Object.entries(trailDots).map(([trainNo, dots]) => {
           const train = activeTrains.find(t => t.train_number === trainNo);
-          const color = train?.delay_minutes > 60 ? '#ff3366' : train?.delay_minutes > 15 ? '#ffb300' : '#00f0ff';
+          const color = train?.delay_minutes > 60 ? '#FF3333' : train?.delay_minutes > 15 ? '#FFB000' : '#00FF66';
           return dots.slice(0, -1).map((dot, i) => {
             const opacity = (i + 1) / dots.length * 0.45;
             const radius  = 2 + i * 0.6;
@@ -396,13 +399,13 @@ export default function LiveMap({ trains = [], incidents = [] }) {
             {detourCoords ? (
               <>
                 {originalCoords.length > 1 && (
-                  <Polyline positions={originalCoords} pathOptions={{ color: '#2a3a4a', weight: 2, dashArray: '4, 6', opacity: 0.5 }} />
+                  <Polyline positions={originalCoords} pathOptions={{ color: '#26354A', weight: 2, dashArray: '4, 6', opacity: 0.5 }} />
                 )}
-                <AnimatedPolyline positions={detourCoords} color="#ff3366" weight={4} isDashed={true} />
+                <AnimatedPolyline positions={detourCoords} color="#FF3333" weight={4} isDashed={true} />
               </>
             ) : (
               originalCoords.length > 1 && (
-                <AnimatedPolyline positions={originalCoords} color="#00f0ff" weight={3} />
+                <AnimatedPolyline positions={originalCoords} color="#00FF66" weight={3} />
               )
             )}
           </>
@@ -423,16 +426,19 @@ export default function LiveMap({ trains = [], incidents = [] }) {
           const isCritical = delay > 60 || train.status?.toLowerCase() === 'cancelled';
           const isDelayed = delay > 15;
           const statusText = isCritical ? 'CRITICAL' : isDelayed ? 'DELAYED' : 'ON TIME';
-          const statusColor = isCritical ? '#ff3366' : isDelayed ? '#ffb300' : '#00f0ff';
+          const statusColor = isCritical ? '#FF3333' : isDelayed ? '#FFB000' : '#00FF66';
           const hasApprovedDetour = (incidents || []).some(
             inc => inc.train_number === train.train_number && inc.approved && inc.reroute_plan
           );
+
+          // Calculate bearing if speed/trajectory is available (mocking with simple calculation for now)
+          const bearing = (idx * 45) % 360;
 
           return (
             <Marker
               key={train.train_number || idx}
               position={position}
-              icon={createMarkerIcon(train.status?.toLowerCase(), delay, isSelected)}
+              icon={createMarkerIcon(train.status?.toLowerCase(), delay, isSelected, bearing)}
               eventHandlers={{ click: () => setSelectedTrainNo(prev => prev === train.train_number ? null : train.train_number) }}
               zIndexOffset={isSelected ? 1000 : 0}
             >
