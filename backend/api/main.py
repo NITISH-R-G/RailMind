@@ -78,63 +78,29 @@ latest_agent_state = {
 }
 
 
-async def run_agent_loop_fallback():
-    from ..agents.graph import railmind_graph
-    from ..agents.state import AgentState
-    import uuid
-    train_numbers = [
-        "12301", "12951", "12001", "12259", "12565",
-        "11057", "12627", "12625", "12621", "12615",
-        "12309", "12721", "12229", "12311", "12641"
-    ]
-    processed_trains = []
-    
-    # Wait a few seconds for startup to settle
-    await asyncio.sleep(5)
-    
-    while True:
-        try:
-            print("[RAILMIND] Local background agent loop run starting...")
-            initial_state = AgentState(
-                raw_train_data=[],
-                anomalies=[],
-                claude_reasoning="",
-                reroute_plan=None,
-                department_tasks=[],
-                sms_alerts_sent=[],
-                incident_report=None,
-                loop_count=0,
-                should_continue=False,
-                last_api_call="Never",
-                railways_latency_ms=0,
-                ai_latency_ms=0,
-                processed_trains=processed_trains,
-                target_trains=train_numbers
-            )
-            thread_id = f"local_bg_{uuid.uuid4().hex[:8]}"
-            config = {"configurable": {"thread_id": thread_id}, "recursion_limit": 20}
-            result = await railmind_graph.ainvoke(initial_state, config)
-            if result:
-                processed_trains = result.get("processed_trains", [])
-                latest_agent_state.update({
-                    "raw_train_data": result.get("raw_train_data", []),
-                    "anomalies": result.get("anomalies", []),
-                    "claude_reasoning": result.get("claude_reasoning", ""),
-                    "reroute_plan": result.get("reroute_plan"),
-                    "department_tasks": result.get("department_tasks", []),
-                    "sms_alerts_sent": result.get("sms_alerts_sent", []),
-                    "incident_report": result.get("incident_report"),
-                    "loop_count": result.get("loop_count", 0),
-                    "should_continue": result.get("should_continue", False),
-                    "last_api_call": result.get("last_api_call", "Never"),
-                    "railways_latency_ms": result.get("railways_latency_ms", 0),
-                    "ai_latency_ms": result.get("ai_latency_ms", 0),
-                    "processed_trains": processed_trains
-                })
-            print("[RAILMIND] Local background agent loop run completed.")
-        except Exception as e:
-            print(f"[RAILMIND] Local background agent loop failed: {e}")
-        await asyncio.sleep(60)
+from arq import create_pool
+from arq.connections import RedisSettings
+
+async def init_redis_pool():
+    redis_url = os.getenv("REDIS_URL", "redis://localhost:6379")
+    host = "localhost"
+    port = 6379
+    if redis_url.startswith("redis://"):
+        parts = redis_url[8:].split(":")
+        if len(parts) == 2:
+            host = parts[0]
+            try:
+                port = int(parts[1])
+            except ValueError:
+                pass
+        else:
+            host = parts[0]
+    settings = RedisSettings(host=host, port=port)
+    try:
+        app.state.redis_pool = await create_pool(settings)
+        print("[RAILMIND] ARQ Redis pool initialized [OK]")
+    except Exception as e:
+        print(f"[RAILMIND] Failed to init ARQ Redis pool: {e}")
 
 @app.on_event("startup")
 async def startup_event():
@@ -152,8 +118,7 @@ async def startup_event():
     except Exception as e:
         print(f"[RAILMIND] MongoDB connection/cleanup failed: {e}")
 
-    # Run the agent workflow loop asynchronously in the background on API startup
-    asyncio.create_task(run_agent_loop_fallback())
+    await init_redis_pool()
 
 # Include general REST routers
 app.include_router(router, prefix="/api")
@@ -285,6 +250,30 @@ async def get_system_status():
     }
 
 # REST Endpoint: GET /api/telemetry -> returns timing metrics
+
+from fastapi import Request
+@app.post("/api/telemetry/ingest")
+async def ingest_telemetry_api(request: Request):
+    """
+    Decoupled ingestion pipeline. Enqueues telemetry to ARQ.
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+
+    train_numbers = body.get("trains", [
+        "12301", "12951", "12001", "12259", "12565",
+        "11057", "12627", "12625", "12621", "12615",
+        "12309", "12721", "12229", "12311", "12641"
+    ])
+
+    if hasattr(app.state, "redis_pool"):
+        await app.state.redis_pool.enqueue_job("process_train_telemetry", train_numbers)
+        return {"status": "enqueued", "train_count": len(train_numbers)}
+    else:
+        raise HTTPException(status_code=500, detail="ARQ Redis pool not initialized")
+
 @app.get("/api/telemetry")
 async def get_telemetry_api():
     incident_count = 0

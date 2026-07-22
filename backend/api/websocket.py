@@ -22,14 +22,24 @@ class ConnectionManager:
         self.channel = "railmind_telemetry"
         self._listener_task = None
         self.MAX_CONNECTIONS = 1000
+        self.GLOBAL_CONN_KEY = "global_active_connections"
 
     async def connect(self, websocket: WebSocket):
-        if len(self.active_connections) >= self.MAX_CONNECTIONS:
-            logger.warning("WebSocket connection limit reached. Rejecting connection.")
+        # Enforce global WebSocket connection pool limits using a Redis atomic counter
+        current_conns = await self.redis.incr(self.GLOBAL_CONN_KEY)
+        if current_conns > self.MAX_CONNECTIONS:
+            logger.warning("Global WebSocket connection limit reached. Rejecting connection.")
+            await self.redis.decr(self.GLOBAL_CONN_KEY)
             await websocket.close(code=1008, reason="Connection limit exceeded")
             return False
 
-        await websocket.accept()
+        try:
+            await websocket.accept()
+        except Exception as e:
+            logger.error(f"Error accepting connection: {e}")
+            await self.redis.decr(self.GLOBAL_CONN_KEY)
+            return False
+
         self.active_connections.append(websocket)
 
         # Start the listener task if it's not already running
@@ -40,27 +50,25 @@ class ConnectionManager:
             await websocket.send_json({"type": "connection_established", "message": "Connected to RailMind WebSocket", "state_recovery": "sync_required"})
         except Exception as e:
             logger.error(f"Error sending connection response: {e}")
+            await self.disconnect(websocket)
+            return False
+
         return True
 
-    def disconnect(self, websocket: WebSocket):
+    async def disconnect(self, websocket: WebSocket):
         if websocket in self.active_connections:
             self.active_connections.remove(websocket)
+            try:
+                await self.redis.decr(self.GLOBAL_CONN_KEY)
+            except Exception as e:
+                logger.error(f"Error decrementing global connections: {e}")
 
     async def broadcast(self, message: str):
-        # Publish to Redis instead of sending directly to active_connections
+        # Publish to Redis (strictly relies on Pub/Sub for broadcasting)
         try:
             await self.redis.publish(self.channel, message)
         except Exception as e:
-            logger.error(f"Error publishing to Redis: {e}. Falling back to direct connection broadcasting.")
-            failed_connections = []
-            for connection in self.active_connections:
-                try:
-                    await connection.send_text(message)
-                except Exception as ex:
-                    logger.error(f"Error sending directly to client: {ex}")
-                    failed_connections.append(connection)
-            for connection in failed_connections:
-                self.disconnect(connection)
+            logger.error(f"Error publishing to Redis: {e}")
 
     async def _listen_to_redis(self):
         while True:
@@ -79,7 +87,7 @@ class ConnectionManager:
                                 failed_connections.append(connection)
 
                         for connection in failed_connections:
-                            self.disconnect(connection)
+                            await self.disconnect(connection)
             except asyncio.CancelledError:
                 break
             except Exception as e:
@@ -106,14 +114,16 @@ async def websocket_endpoint(websocket: WebSocket):
             data = await websocket.receive_text()
             if data == "PING" or data == "PING_TEST":
                 await websocket.send_json({"type": "echo", "received": data})
+            elif data == "SYNC_STATE" or data == '{"type":"SYNC_STATE"}':
+                await websocket.send_json({"type": "state_recovery_ack", "message": "State recovery initiated"})
             else:
                 await websocket.send_json({
                     "type": "echo",
                     "received": data
                 })
     except WebSocketDisconnect:
-        websocket_manager.disconnect(websocket)
+        await websocket_manager.disconnect(websocket)
     except Exception as e:
         logger.error(f"WebSocket connection error: {e}")
-        websocket_manager.disconnect(websocket)
+        await websocket_manager.disconnect(websocket)
 

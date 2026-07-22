@@ -60,50 +60,10 @@ async def evaluate_previous_action(state: AgentState) -> AgentState:
     try:
         await log_agent("evaluate_previous_action", "[RAILMIND] Checking and evaluating previous self-healing actions...")
         
-        # Pre-ingest live train status if raw_train_data is empty (since this node runs first)
+        # In the decoupled architecture, raw_train_data is injected by the ARQ worker.
+        # We no longer block and fetch trains manually in a loop here.
         if not state.get("raw_train_data"):
-            train_numbers = [
-                "12301", "12951", "12001", "12259", "12565",
-                "11057", "12627", "12625", "12621", "12615",
-                "12309", "12721", "12229", "12311", "12641"
-            ]
-            import time
-            start_time = time.time()
-            client = railways_client
-            print(f"[RAILMIND] Pre-ingesting Railways API for {len(train_numbers)} trains...")
-            results = await client.get_multiple_trains(train_numbers)
-            
-            train_results = []
-            for tn in train_numbers:
-                found = False
-                for r in results:
-                    if r.get("train_number") == tn:
-                        train_results.append(r)
-                        found = True
-                        break
-                if not found:
-                    from ..services.railways_api import get_mock_rapidapi_train, parse_rapidapi_train_for_agent
-                    mock_data = get_mock_rapidapi_train(tn)
-                    parsed_mock = parse_rapidapi_train_for_agent(mock_data, tn)
-                    if parsed_mock:
-                        train_results.append(parsed_mock)
-            
-            cancelled = await get_cancelled_trains()
-            live_trains = train_results.copy()
-            for train in cancelled:
-                live_trains.append({
-                    "train_number": train.get("TrainNo", "Unknown"),
-                    "train_name": train.get("TrainName", "Unknown"),
-                    "status": "cancelled",
-                    "delay_minutes": 999,
-                    "passenger_load": "overcrowded",
-                    "current_station": "Unknown",
-                    "lat": 20.5937,
-                    "lng": 78.9629
-                })
-            state["raw_train_data"] = live_trains
-            state["last_api_call"] = datetime.utcnow().isoformat()
-            state["railways_latency_ms"] = int((time.time() - start_time) * 1000)
+            state["raw_train_data"] = []
 
         # Evaluate pending incidents
         for train in state.get("raw_train_data", []):
@@ -155,72 +115,8 @@ async def evaluate_previous_action(state: AgentState) -> AgentState:
 async def ingest_node(state: AgentState) -> AgentState:
     try:
         await log_agent("SCANNING", "Polling 15 trains on Indian Railways...")
-        # If evaluate_previous_action already populated the raw train data, reuse it
-        if state.get("raw_train_data"):
-            live_trains = state["raw_train_data"]
-        else:
-            train_numbers = state.get("target_trains")
-            if not train_numbers:
-                train_numbers = [
-                    "12301", "12951", "12001", "12259", "12565",
-                    "11057", "12627", "12625", "12621", "12615",
-                    "12309", "12721", "12229", "12311", "12641",
-                    "12438", "ICE"
-                ]
-            
-            import time
-            start_time = time.time()
-            
-            client = railways_client
-            print(f"[RAILMIND] Calling Railways API for {len(train_numbers)} trains...")
-            results = await client.get_multiple_trains(train_numbers)
-            
-            # Ensure that if some train fetches failed and returned empty dict, they fallback to get_mock_rapidapi_train
-            # So we always have all 15 trains
-            train_results = []
-            for tn in train_numbers:
-                found = False
-                for r in results:
-                    if r.get("train_number") == tn:
-                        train_results.append(r)
-                        found = True
-                        break
-                if not found:
-                    from ..services.railways_api import get_mock_rapidapi_train, parse_rapidapi_train_for_agent
-                    mock_data = get_mock_rapidapi_train(tn)
-                    parsed_mock = parse_rapidapi_train_for_agent(mock_data, tn)
-                    if parsed_mock:
-                        train_results.append(parsed_mock)
-            
-            results = train_results
-            
-            latency = int((time.time() - start_time) * 1000)
-            state["last_api_call"] = datetime.utcnow().isoformat()
-            state["railways_latency_ms"] = latency
-            
-            print(f"[RAILMIND] API returned {len(results)} trains")
-            print(f"[RAILMIND] Sample: {results[0] if results else 'EMPTY - using mock'}")
-            
-            if not results:
-                print("[RAILMIND] WARNING: Railways API returned no data, check RAILWAYS_API_KEY in .env")
-                await log_agent("ingest_node", "[RAILMIND] WARNING: Railways API returned no data, check RAILWAYS_API_KEY in .env")
-                results = mock_train_data()
-                print("[RAILMIND] Using mock fallback data")
-                await log_agent("ingest_node", "[RAILMIND] Using mock fallback data")
-                
-            cancelled = await get_cancelled_trains()
-            live_trains = results.copy()
-            for train in cancelled:
-                live_trains.append({
-                    "train_number": train.get("TrainNo", "Unknown"),
-                    "train_name": train.get("TrainName", "Unknown"),
-                    "status": "cancelled",
-                    "delay_minutes": 999,
-                    "passenger_load": "overcrowded",
-                    "current_station": "Unknown",
-                    "lat": 20.5937,
-                    "lng": 78.9629
-                })
+        # Raw train data should be passed directly via state in the decoupled architecture.
+        live_trains = state.get("raw_train_data", [])
         
         for train in live_trains:
             await websocket_manager.broadcast(json.dumps({
