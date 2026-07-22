@@ -61,7 +61,7 @@ async def test_reason_node_tool_recovery():
 
         parsed = json.loads(new_state["claude_reasoning"])
         assert "situation_summary" in parsed
-        assert "delayed" in parsed["situation_summary"]
+        assert "incident_title" in parsed
 
 @pytest.mark.asyncio
 async def test_supervisor_self_correction():
@@ -89,7 +89,8 @@ async def test_supervisor_self_correction():
         "next_node": "",
         "last_node_executed": "reason_node",
         "messages": [],
-        "tools_used": []
+        "tools_used": [],
+        "prediction": {"fake": "fake"}
     }
 
     from backend.agents.nodes import supervisor_node
