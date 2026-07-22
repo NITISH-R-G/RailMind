@@ -922,6 +922,43 @@
       "action_required": "Make passenger announcement + update platform boards",
       "status": "pending",
       "timestamp": "2026-06-14 13:04:01.066977"
+    },
+    {
+      "incident_id": "b3977db8-83db-421f-8de2-1cbed4c8f4e3",
+      "department": "maintenance",
+      "task_description": "Platform inspection CNB",
+      "urgency": "critical",
+      "action_required": "Emergency dispatch action",
+      "status": "pending",
+      "timestamp": "2026-07-22 03:36:13.607745"
+    },
+    {
+      "incident_id": "6cd152a9-4b62-4173-8fd6-f63657e21abd",
+      "department": "maintenance",
+      "task_description": "Platform inspection CNB",
+      "urgency": "critical",
+      "action_required": "Emergency dispatch action",
+      "status": "pending",
+      "timestamp": "2026-07-22 03:37:06.731661"
+    },
+    {
+      "incident_id": "fc4a9a0f-bcff-4e94-8e2d-f5a25bb98750",
+      "department": "maintenance",
+      "task_description": "Platform inspection CNB",
+      "urgency": "critical",
+      "action_required": "Emergency dispatch action",
+      "status": "pending",
+      "timestamp": "2026-07-22 03:48:57.363721"
+    },
+    {
+      "incident_id": "18879dae-4e0d-47e4-a74e-c0e7537512fb",
+      "department": "maintenance",
+      "task_description": "Platform inspection CNB",
+      "urgency": "critical",
+      "action_required": "Emergency dispatch action",
+      "status": "pending",
+      "timestamp": "2026-07-22 03:49:52.513072"
     }
-  ]
+  ],
+  "agent_memory": []
 }
