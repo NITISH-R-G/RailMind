@@ -632,14 +632,16 @@ async def _gemini_try_call(prompt: str) -> str:
 
     return response_text
 
-async def _gemini_fallback_call(prompt: str, state: AgentState) -> dict:
+
+
+async def __mock_fallback(prompt: str, state: AgentState) -> dict:
     logger.warning("Circuit breaker OPEN. Executing local mock LLM fallback.")
     return generate_mock_json_fallback(prompt, state)
 
 async def call_gemini(prompt: str, state: AgentState = None) -> dict:
     try:
         response_text = await llm_circuit_breaker.execute(
-            lambda *args: _gemini_fallback_call(prompt, state),
+            lambda *args: __mock_fallback(prompt, state),
             _gemini_try_call,
             prompt
         )
