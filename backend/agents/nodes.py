@@ -599,43 +599,64 @@ def generate_mock_json_fallback(prompt: str, state: AgentState) -> dict:
             "confidence": 0.94
         }
 
-async def call_gemini(prompt: str, state: AgentState = None) -> dict:
-    async def try_call():
-        gemini_key = settings.GEMINI_API_KEY
-        anthropic_key = settings.ANTHROPIC_API_KEY
+async def _gemini_try_call(prompt: str) -> str:
+    from ..config import settings
+    gemini_key = settings.GEMINI_API_KEY
+    anthropic_key = settings.ANTHROPIC_API_KEY
 
-        response_text = None
+    response_text = None
 
-        # Try Gemini 2.0 Flash first
-        if gemini_key and gemini_key != "mock_key":
-            import google.generativeai as genai
-            genai.configure(api_key=gemini_key)
-            model = genai.GenerativeModel("gemini-2.0-flash")
-            response = await model.generate_content_async(
-                prompt,
-                generation_config={"response_mime_type": "application/json"}
-            )
-            response_text = response.text
-
-        # Try Claude fallback if Gemini failed
-        if not response_text and anthropic_key and anthropic_key != "mock_key":
-            from anthropic import AsyncAnthropic
-            client = AsyncAnthropic(api_key=anthropic_key)
-            response = await client.messages.create(
-                model="claude-3-5-sonnet-20241022",
-                max_tokens=1000,
-                system="You must respond ONLY with a valid JSON block matching the requested format.",
-                messages=[{"role": "user", "content": prompt}]
-            )
-            response_text = response.content[0].text
-
-        if not response_text:
-            raise ValueError("No real LLM API keys provided or responses were empty.")
+    if gemini_key and gemini_key != "mock_key":
+        import google.generativeai as genai
+        genai.configure(api_key=gemini_key)
+        model = genai.GenerativeModel("gemini-2.0-flash")
+        response = await model.generate_content_async(
+            prompt,
+            generation_config={"response_mime_type": "application/json"}
+        )
+        response_text = response.text
             
-        return response_text
+    if not response_text and anthropic_key and anthropic_key != "mock_key":
+        from anthropic import AsyncAnthropic
+        client = AsyncAnthropic(api_key=anthropic_key)
+        response = await client.messages.create(
+            model="claude-3-5-sonnet-20241022",
+            max_tokens=1000,
+            system="You must respond ONLY with a valid JSON block matching the requested format.",
+            messages=[{"role": "user", "content": prompt}]
+        )
+        response_text = response.content[0].text
 
-    async def fallback_call():
-        logger.warning("Circuit breaker OPEN. Executing local mock LLM fallback.")
+    if not response_text:
+        raise ValueError("No real LLM API keys provided or responses were empty.")
+
+    return response_text
+
+async def _gemini_fallback_call(prompt: str, state: AgentState) -> dict:
+    logger.warning("Circuit breaker OPEN. Executing local mock LLM fallback.")
+    return generate_mock_json_fallback(prompt, state)
+
+async def call_gemini(prompt: str, state: AgentState = None) -> dict:
+    try:
+        response_text = await llm_circuit_breaker.execute(
+            lambda *args: _gemini_fallback_call(prompt, state),
+            _gemini_try_call,
+            prompt
+        )
+
+        if isinstance(response_text, dict):
+            return response_text
+
+        clean_text = response_text.strip()
+        if clean_text.startswith("```json"):
+            clean_text = clean_text[7:]
+        if clean_text.endswith("```"):
+            clean_text = clean_text[:-3]
+        clean_text = clean_text.strip()
+        SUBAGENT_TOKEN_CONSUMPTION.labels(agent_name="reason_node").inc(100)
+        return json.loads(clean_text)
+    except Exception as e:
+        logger.warning(f"Failed to parse LLM response or execution failed: {e}")
         return generate_mock_json_fallback(prompt, state)
 
     try:

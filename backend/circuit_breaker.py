@@ -13,14 +13,14 @@ class CircuitBreaker:
         self.last_failure_time: Optional[float] = None
         self.lock = asyncio.Lock()
 
-    async def _handle_failure(self):
+    def _handle_failure(self):
         self.failure_count += 1
         if self.failure_count >= self.failure_threshold:
             self.state = "OPEN"
             self.last_failure_time = asyncio.get_event_loop().time()
             logger.warning("Circuit Breaker OPENED. Threshold reached: %s", self.failure_threshold)
 
-    async def _handle_success(self):
+    def _handle_success(self):
         if self.state == "HALF_OPEN":
             self.state = "CLOSED"
             self.failure_count = 0
@@ -52,12 +52,12 @@ class CircuitBreaker:
         try:
             result = await target_func(*args, **kwargs)
             async with self.lock:
-                await self._handle_success()
+                self._handle_success()
             return result
         except Exception as e:
-            logger.error("Execution failed: %s", e, exc_info=True)
+            logger.exception("Execution failed: %s", e)
             async with self.lock:
-                await self._handle_failure()
+                self._handle_failure()
             logger.warning("Executing fallback after failure.")
             return await fallback_func(*args, **kwargs)
 
