@@ -7,6 +7,7 @@ from pymongo.errors import DuplicateKeyError
 from pymongo import IndexModel, ASCENDING, DESCENDING # type: ignore
 import logging
 from dotenv import load_dotenv
+from ..config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -15,7 +16,7 @@ env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__
 load_dotenv(dotenv_path=env_path)
 
 # Real MongoDB Atlas Connection for RailMind
-MONGODB_URI = os.getenv("MONGODB_URI")
+MONGODB_URI = settings.MONGODB_URI
 client = AsyncIOMotorClient(MONGODB_URI, maxPoolSize=50)
 db = client["railmind"]
 
