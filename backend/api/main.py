@@ -17,8 +17,8 @@ from ..services.db_client import db_client
 security = HTTPBasic()
 
 def verify_admin(credentials: HTTPBasicCredentials = Depends(security)):
-    admin_user = os.getenv("ADMIN_USERNAME", "admin")
-    admin_pass = os.getenv("ADMIN_PASSWORD")
+    admin_user = settings.ADMIN_USERNAME
+    admin_pass = settings.ADMIN_PASSWORD
     if not admin_pass:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -37,9 +37,11 @@ def verify_admin(credentials: HTTPBasicCredentials = Depends(security)):
 
 from .routes import router
 from .websocket import websocket_endpoint, websocket_manager # type: ignore
+from prometheus_client import make_asgi_app, Counter, Histogram
 from ..agents.graph import railmind_graph # type: ignore
 from ..agents.state import AgentState # type: ignore
 from ..services.railways_api import RailwaysAPIClient
+from ..config import settings
 
 app = FastAPI(
     title="RailMind Operations API",
@@ -56,8 +58,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Prometheus Metrics
+AGENT_LATENCY = Histogram('agent_loop_latency_seconds', 'Time spent processing agent loop')
+API_REQUEST_COUNT = Counter('api_requests_total', 'Total API requests')
+
+# Expose Prometheus metrics
+metrics_app = make_asgi_app()
+app.mount("/metrics", metrics_app)
+
 # Initialize railways client for fallback train list queries
-api_key = os.getenv("RAILWAYS_API_KEY", "mock_key")
+api_key = settings.RAILWAYS_API_KEY
 railways_client = RailwaysAPIClient(api_key=api_key)
 
 # Global reference storing the most recent loop state from the agent background thread
@@ -260,14 +270,14 @@ async def get_system_status():
         pass
 
     # Railways API
-    railways_api_key = os.getenv("RAILWAYS_API_KEY", "")
-    rapidapi_key = os.getenv("RAPIDAPI_KEY", "")
+    railways_api_key = settings.RAILWAYS_API_KEY
+    rapidapi_key = settings.RAPIDAPI_KEY or ""
     is_railways_connected = (railways_api_key not in ["", "your_railways_api_key_here"]) or (rapidapi_key not in ["", "your_key_here"])
     railways_status = "Connected" if is_railways_connected else "Disconnected"
 
     # Twilio SMS
-    twilio_sid = os.getenv("TWILIO_ACCOUNT_SID", "")
-    twilio_token = os.getenv("TWILIO_AUTH_TOKEN", "")
+    twilio_sid = settings.TWILIO_ACCOUNT_SID
+    twilio_token = settings.TWILIO_AUTH_TOKEN
     is_twilio_connected = twilio_sid not in ["", "mock_sid"] and twilio_token not in ["", "mock_token"]
     twilio_status = "Connected" if is_twilio_connected else "Disconnected"
 
@@ -278,9 +288,9 @@ async def get_system_status():
         "twilio_sms": twilio_status,
         "mongodb": mongo_status,
         "contacts": {
-            "maintenance": os.getenv("MAINTENANCE_PHONE", "+919651058174"),
-            "operations": os.getenv("OPERATIONS_PHONE", "+919651058174"),
-            "station_manager": os.getenv("STATION_PHONE", "+919651058174")
+            "maintenance": settings.MAINTENANCE_PHONE,
+            "operations": settings.OPERATIONS_PHONE,
+            "station_manager": settings.STATION_PHONE
         }
     }
 

@@ -1,10 +1,11 @@
 from twilio.rest import Client # type: ignore
 import os
+from ..config import settings
 from typing import Optional
 
-account_sid = os.getenv("TWILIO_ACCOUNT_SID")
-auth_token = os.getenv("TWILIO_AUTH_TOKEN")
-from_number = os.getenv("TWILIO_PHONE_NUMBER")
+account_sid = settings.TWILIO_ACCOUNT_SID
+auth_token = settings.TWILIO_AUTH_TOKEN
+from_number = settings.TWILIO_PHONE_NUMBER
 
 # Initialize Twilio Client
 try:
@@ -40,9 +41,9 @@ async def send_sms(to: str, message: str) -> bool:
 async def send_department_alerts(department_tasks: list) -> list:
     sent = []
     dept_phones = {
-        "maintenance": os.getenv("MAINTENANCE_PHONE"),
-        "operations": os.getenv("OPERATIONS_PHONE"),
-        "station_manager": os.getenv("STATION_PHONE")
+        "maintenance": settings.MAINTENANCE_PHONE,
+        "operations": settings.OPERATIONS_PHONE,
+        "station_manager": settings.STATION_PHONE
     }
     for task in department_tasks:
         phone = dept_phones.get(task["department"])
@@ -53,15 +54,15 @@ async def send_department_alerts(department_tasks: list) -> list:
                 sent.append(f"{task['department']} -> {phone}")
     
     passenger_sms = f"[RailMind Alert] Train delay detected. Please check platform boards for updates."
-    await send_sms(os.getenv("DEMO_PASSENGER_PHONE"), passenger_sms)
+    await send_sms(settings.DEMO_PASSENGER_PHONE, passenger_sms)
     
     return sent
 
 class TwilioSMSClient:
     def __init__(self, account_sid: str = None, auth_token: str = None, from_number: str = None):
-        self.account_sid = account_sid or os.getenv("TWILIO_ACCOUNT_SID")
-        self.auth_token = auth_token or os.getenv("TWILIO_AUTH_TOKEN")
-        self.from_number = from_number or os.getenv("TWILIO_PHONE_NUMBER")
+        self.account_sid = account_sid or settings.TWILIO_ACCOUNT_SID
+        self.auth_token = auth_token or settings.TWILIO_AUTH_TOKEN
+        self.from_number = from_number or settings.TWILIO_PHONE_NUMBER
         try:
             if self.account_sid and self.auth_token:
                 self.client = Client(self.account_sid, self.auth_token)

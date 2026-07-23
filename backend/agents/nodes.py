@@ -1,29 +1,54 @@
+import time
 import os
 import json
 import logging
 import traceback
 from dotenv import load_dotenv
 from typing import Dict, Any, List
+from logging.handlers import RotatingFileHandler
+from pythonjsonlogger import jsonlogger
 from uuid import uuid4
 from datetime import datetime
+from prometheus_client import Counter, Histogram
 from ..services.ai_service import reason_with_ai
 from .state import AgentState, TrainAnomaly, DepartmentTask
 from ..services.db_client import db_client
 from ..services.railways_api import get_live_train_status, get_cancelled_trains, mock_train_data, RailwaysAPIClient, get_multiple_trains
 from ..services.twilio_service import TwilioSMSClient
+from ..config import settings
+from ..circuit_breaker import llm_circuit_breaker, twilio_circuit_breaker
 from ..api.websocket import websocket_manager
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("railmind_agent")
+logger.setLevel(logging.INFO)
+
+# Structured JSON Logging Setup
+log_dir = "/var/log/railmind"
+try:
+    os.makedirs(log_dir, exist_ok=True)
+    log_file = os.path.join(log_dir, "app.json")
+    handler = RotatingFileHandler(log_file, maxBytes=10*1024*1024, backupCount=5)
+    formatter = jsonlogger.JsonFormatter('%(asctime)s %(levelname)s %(name)s %(message)s')
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
+except Exception as e:
+    print(f"Warning: Could not setup file logging at {log_dir}. Falling back to standard logging. Error: {e}")
+
+# Prometheus Metrics
+SUBAGENT_TOKEN_CONSUMPTION = Counter('subagent_token_consumption_total', 'Total tokens consumed by sub-agents', ['agent_name'])
+NODE_TRACKING_LATENCY = Histogram('node_tracking_latency_seconds', 'Latency of individual nodes', ['node_name'])
+ERROR_RATE_SPIKES = Counter('error_rate_spikes_total', 'Total error rate spikes', ['node_name', 'error_type'])
+TWILIO_API_STATUS = Counter('twilio_api_status_total', 'Twilio API response statuses', ['status'])
 
 # Ensure env variables are loaded before configuration
 env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
 load_dotenv(dotenv_path=env_path)
-api_key = os.getenv("RAILWAYS_API_KEY", "mock_key")
+api_key = settings.RAILWAYS_API_KEY
 railways_client = RailwaysAPIClient(api_key=api_key)
 
-twilio_sid = os.getenv("TWILIO_ACCOUNT_SID", "mock_sid")
-twilio_token = os.getenv("TWILIO_AUTH_TOKEN", "mock_token")
-twilio_from = os.getenv("TWILIO_PHONE_NUMBER", "+1234567890")
+twilio_sid = settings.TWILIO_ACCOUNT_SID
+twilio_token = settings.TWILIO_AUTH_TOKEN
+twilio_from = settings.TWILIO_PHONE_NUMBER
 twilio_client = TwilioSMSClient(account_sid=twilio_sid, auth_token=twilio_token, from_number=twilio_from)
 
 # Shared log assistant that prints logs and broadcasts AGENT_LOG & AGENT_STATE_CHANGE WebSocket events
@@ -67,7 +92,6 @@ async def evaluate_previous_action(state: AgentState) -> AgentState:
                 "11057", "12627", "12625", "12621", "12615",
                 "12309", "12721", "12229", "12311", "12641"
             ]
-            import time
             start_time = time.time()
             client = railways_client
             print(f"[RAILMIND] Pre-ingesting Railways API for {len(train_numbers)} trains...")
@@ -152,7 +176,9 @@ async def evaluate_previous_action(state: AgentState) -> AgentState:
         await log_agent("evaluate_previous_action", f"[RAILMIND] [ERROR] Self-healing evaluation failed: {e}")
     return state
 
+
 async def ingest_node(state: AgentState) -> AgentState:
+    start_time_node = time.time()
     try:
         await log_agent("SCANNING", "Polling 15 trains on Indian Railways...")
         # If evaluate_previous_action already populated the raw train data, reuse it
@@ -168,8 +194,7 @@ async def ingest_node(state: AgentState) -> AgentState:
                     "12438", "ICE"
                 ]
             
-            import time
-            start_time = time.time()
+                start_time = time.time()
             
             client = railways_client
             print(f"[RAILMIND] Calling Railways API for {len(train_numbers)} trains...")
@@ -232,10 +257,14 @@ async def ingest_node(state: AgentState) -> AgentState:
         await log_agent("ingest_node", f"[RAILMIND] Ingested {len(live_trains)} trains")
     except Exception as e:
         logger.error(f"Error in ingest_node: {e}")
+        ERROR_RATE_SPIKES.labels(node_name='ingest_node', error_type=type(e).__name__).inc()
         await log_agent("ingest_node", f"[RAILMIND] [ERROR] Ingest node failed: {e}")
+    finally:
+        NODE_TRACKING_LATENCY.labels(node_name='ingest_node').observe(time.time() - start_time_node)
     return state
 
 async def detect_node(state: AgentState) -> AgentState:
+    start_time_node = time.time()
     try:
         await log_agent("detect_node", "[RAILMIND] Running real-time anomaly detection rules...")
         anomalies: List[TrainAnomaly] = []
@@ -365,7 +394,10 @@ async def detect_node(state: AgentState) -> AgentState:
             state["should_continue"] = False
     except Exception as e:
         logger.error(f"Error in detect_node: {e}")
+        ERROR_RATE_SPIKES.labels(node_name='detect_node', error_type=type(e).__name__).inc()
         await log_agent("detect_node", f"[RAILMIND] [ERROR] Detect node failed: {e}")
+    finally:
+        NODE_TRACKING_LATENCY.labels(node_name='detect_node').observe(time.time() - start_time_node)
     return state
 
 def get_station_code_from_name(station_name: str) -> str:
@@ -568,14 +600,14 @@ def generate_mock_json_fallback(prompt: str, state: AgentState) -> dict:
         }
 
 async def call_gemini(prompt: str, state: AgentState = None) -> dict:
-    gemini_key = os.getenv("GEMINI_API_KEY")
-    anthropic_key = os.getenv("ANTHROPIC_API_KEY")
-    
-    response_text = None
-    
-    # Try Gemini 2.0 Flash first
-    if gemini_key and gemini_key != "mock_key":
-        try:
+    async def try_call():
+        gemini_key = settings.GEMINI_API_KEY
+        anthropic_key = settings.ANTHROPIC_API_KEY
+
+        response_text = None
+
+        # Try Gemini 2.0 Flash first
+        if gemini_key and gemini_key != "mock_key":
             import google.generativeai as genai
             genai.configure(api_key=gemini_key)
             model = genai.GenerativeModel("gemini-2.0-flash")
@@ -584,12 +616,9 @@ async def call_gemini(prompt: str, state: AgentState = None) -> dict:
                 generation_config={"response_mime_type": "application/json"}
             )
             response_text = response.text
-        except Exception as e:
-            logger.warning(f"Gemini API call failed: {e}. Trying fallback.")
-            
-    # Try Claude fallback if Gemini failed
-    if not response_text and anthropic_key and anthropic_key != "mock_key":
-        try:
+
+        # Try Claude fallback if Gemini failed
+        if not response_text and anthropic_key and anthropic_key != "mock_key":
             from anthropic import AsyncAnthropic
             client = AsyncAnthropic(api_key=anthropic_key)
             response = await client.messages.create(
@@ -599,22 +628,33 @@ async def call_gemini(prompt: str, state: AgentState = None) -> dict:
                 messages=[{"role": "user", "content": prompt}]
             )
             response_text = response.content[0].text
-        except Exception as e:
-            logger.warning(f"Claude fallback API call failed: {e}. Using mock fallback.")
+
+        if not response_text:
+            raise Exception("No real LLM API keys provided or responses were empty.")
             
-    if response_text:
-        try:
-            clean_text = response_text.strip()
-            if clean_text.startswith("```json"):
-                clean_text = clean_text[7:]
-            if clean_text.endswith("```"):
-                clean_text = clean_text[:-3]
-            clean_text = clean_text.strip()
-            return json.loads(clean_text)
-        except Exception as e:
-            logger.warning(f"Failed to parse LLM response as JSON: {e}")
+        return response_text
+
+    async def fallback_call():
+        logger.warning("Circuit breaker OPEN. Executing local mock LLM fallback.")
+        return generate_mock_json_fallback(prompt, state)
+
+    try:
+        response_text = await llm_circuit_breaker.execute(fallback_call, try_call)
+
+        if isinstance(response_text, dict):
+            return response_text
             
-    return generate_mock_json_fallback(prompt, state)
+        clean_text = response_text.strip()
+        if clean_text.startswith("```json"):
+            clean_text = clean_text[7:]
+        if clean_text.endswith("```"):
+            clean_text = clean_text[:-3]
+        clean_text = clean_text.strip()
+        SUBAGENT_TOKEN_CONSUMPTION.labels(agent_name="reason_node").inc(100)
+        return json.loads(clean_text)
+    except Exception as e:
+        logger.warning(f"Failed to parse LLM response or execution failed: {e}")
+        return generate_mock_json_fallback(prompt, state)
 
 async def execute_tool(tool_name: str, params: dict, reason: str, state: AgentState):
     await log_agent("reason_node", f"[TOOL ACT] Executing {tool_name} (Reason: {reason}) with params: {json.dumps(params)}")
@@ -691,9 +731,9 @@ async def execute_tool(tool_name: str, params: dict, reason: str, state: AgentSt
             logger.warning(f"Failed to save task to MongoDB: {e}")
             
         # Send SMS alert via Twilio
-        m_phone = os.getenv("MAINTENANCE_PHONE", "+1234567891")
-        o_phone = os.getenv("OPERATIONS_PHONE", "+1234567892")
-        s_phone = os.getenv("STATION_PHONE", "+1234567893")
+        m_phone = settings.MAINTENANCE_PHONE
+        o_phone = settings.OPERATIONS_PHONE
+        s_phone = settings.STATION_PHONE
         phone_map = {
             "maintenance": m_phone,
             "operations": o_phone,
@@ -706,7 +746,7 @@ async def execute_tool(tool_name: str, params: dict, reason: str, state: AgentSt
         if to_phone:
             message_body = f"[RailMind Tool Alert] {dept.upper()}: {msg[:120]}... Urgency: {urgency}"
             try:
-                sid = await twilio_client.send_incident_alert(to_phone, message_body)
+                sid = await twilio_circuit_breaker.execute(lambda *args: None, twilio_client.send_incident_alert, to_phone, message_body)
                 if sid:
                     if "sms_alerts_sent" not in state or state["sms_alerts_sent"] is None:
                         state["sms_alerts_sent"] = []
@@ -727,10 +767,10 @@ async def execute_tool(tool_name: str, params: dict, reason: str, state: AgentSt
     # 4. Send Passenger Alert
     elif tool_name == "send_passenger_alert":
         msg = params.get("message") or reason
-        p_phone = os.getenv("DEMO_PASSENGER_PHONE", "+1234567894")
+        p_phone = settings.DEMO_PASSENGER_PHONE
         if p_phone:
             try:
-                sid = await twilio_client.send_incident_alert(p_phone, msg[:160])
+                sid = await twilio_circuit_breaker.execute(lambda *args: None, twilio_client.send_incident_alert, p_phone, msg[:160])
                 if sid:
                     if "sms_alerts_sent" not in state or state["sms_alerts_sent"] is None:
                         state["sms_alerts_sent"] = []
@@ -745,6 +785,7 @@ async def execute_tool(tool_name: str, params: dict, reason: str, state: AgentSt
         await log_agent("reason_node", f"[TOOL SUCCESS] Incident escalated to Central Control Room: {summary}")
 
 async def reason_node(state: AgentState) -> AgentState:
+    start_time_node = time.time()
     try:
         anomalies = state.get("anomalies", [])
         if not anomalies:
@@ -804,7 +845,6 @@ async def reason_node(state: AgentState) -> AgentState:
 
         await log_agent("reason_node", f"[RAILMIND] Contacting AI to reason about {len(anomalies)} anomalies...")
         
-        import time
         start_time = time.time()
         
         # STEP 1: PERCEIVE - What is happening?
@@ -908,7 +948,10 @@ async def reason_node(state: AgentState) -> AgentState:
         
     except Exception as e:
         logger.error(f"Error in reason_node: {e}")
+        ERROR_RATE_SPIKES.labels(node_name='reason_node', error_type=type(e).__name__).inc()
         await log_agent("reason_node", f"[RAILMIND] [ERROR] Reason node failed: {e}")
+    finally:
+        NODE_TRACKING_LATENCY.labels(node_name='reason_node').observe(time.time() - start_time_node)
     return state
 
 from .routing import dijkstra_route_discovery
@@ -1064,12 +1107,13 @@ async def coordination_node(state: AgentState) -> AgentState:
     return {}
 
 async def alert_node(state: AgentState) -> AgentState:
+    start_time_node = time.time()
     try:
         await log_agent("alert_node", "[RAILMIND] Sending Twilio notifications...")
-        m_phone = os.getenv("MAINTENANCE_PHONE", "+1234567891")
-        o_phone = os.getenv("OPERATIONS_PHONE", "+1234567892")
-        s_phone = os.getenv("STATION_PHONE", "+1234567893")
-        p_phone = os.getenv("DEMO_PASSENGER_PHONE", "+1234567894")
+        m_phone = settings.MAINTENANCE_PHONE
+        o_phone = settings.OPERATIONS_PHONE
+        s_phone = settings.STATION_PHONE
+        p_phone = settings.DEMO_PASSENGER_PHONE
 
         phone_map = {
             "maintenance": m_phone,
@@ -1089,10 +1133,12 @@ async def alert_node(state: AgentState) -> AgentState:
             if to_phone:
                 message_body = f"[RailMind Alert] {dept.upper()}: {desc[:120]}... Urgency: {urg}"
                 try:
-                    sid = await twilio_client.send_incident_alert(to_phone, message_body)
+                    sid = await twilio_circuit_breaker.execute(lambda *args: None, twilio_client.send_incident_alert, to_phone, message_body)
                     if sid:
+                        TWILIO_API_STATUS.labels(status='success').inc()
                         sent_sms.append(sid)
                 except Exception as e:
+                    TWILIO_API_STATUS.labels(status='error').inc()
                     logger.error(f"Error sending SMS to {dept}: {e}")
 
         # Send passenger SMS
@@ -1105,17 +1151,22 @@ async def alert_node(state: AgentState) -> AgentState:
         pass_sms = claude_response.get("passenger_sms")
         if pass_sms and p_phone:
             try:
-                sid = await twilio_client.send_incident_alert(p_phone, pass_sms[:160])
+                sid = await twilio_circuit_breaker.execute(lambda *args: None, twilio_client.send_incident_alert, p_phone, pass_sms[:160])
                 if sid:
+                    TWILIO_API_STATUS.labels(status='success').inc()
                     sent_sms.append(sid)
             except Exception as e:
+                TWILIO_API_STATUS.labels(status='error').inc()
                 logger.error(f"Error sending passenger SMS: {e}")
 
         await log_agent("alert_node", f"[RAILMIND] SMS alerts sent to {len(sent_sms)} recipients")
         return {"sms_alerts_sent": sent_sms}
     except Exception as e:
         logger.error(f"Error in alert_node: {e}")
+        ERROR_RATE_SPIKES.labels(node_name='alert_node', error_type=type(e).__name__).inc()
         await log_agent("alert_node", f"[RAILMIND] [ERROR] Alert node failed: {e}")
+    finally:
+        NODE_TRACKING_LATENCY.labels(node_name='alert_node').observe(time.time() - start_time_node)
     return {}
 
 async def save_incident_if_not_duplicate(incident):
