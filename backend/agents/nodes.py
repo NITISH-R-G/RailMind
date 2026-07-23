@@ -630,7 +630,7 @@ async def call_gemini(prompt: str, state: AgentState = None) -> dict:
             response_text = response.content[0].text
 
         if not response_text:
-            raise Exception("No real LLM API keys provided or responses were empty.")
+            raise ValueError("No real LLM API keys provided or responses were empty.")
             
         return response_text
 

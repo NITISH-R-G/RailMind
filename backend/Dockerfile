@@ -21,7 +21,7 @@ WORKDIR /app
 # Copy wheels and install
 COPY --from=builder /app/wheels /wheels
 COPY --from=builder /app/requirements.txt .
-RUN pip install --no-cache /wheels/*
+RUN pip install --no-cache-dir /wheels/*
 
 # Set ownership and create log dir
 RUN mkdir -p /var/log/railmind && chown -R railmind:railmind /app /var/log/railmind
@@ -30,7 +30,12 @@ RUN mkdir -p /var/log/railmind && chown -R railmind:railmind /app /var/log/railm
 USER railmind
 
 # Copy the rest of the application code
-COPY --chown=railmind:railmind . /app/backend
+# Copy the rest of the application code explicitly
+COPY --chown=railmind:railmind agents /app/backend/agents
+COPY --chown=railmind:railmind api /app/backend/api
+COPY --chown=railmind:railmind models /app/backend/models
+COPY --chown=railmind:railmind services /app/backend/services
+COPY --chown=railmind:railmind *.py /app/backend/
 
 # Expose API port
 EXPOSE 8000
