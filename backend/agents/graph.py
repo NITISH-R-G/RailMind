@@ -2,14 +2,12 @@ from langgraph.graph import StateGraph, END  # type: ignore
 import os
 from .state import AgentState  # type: ignore
 from .nodes import (  # type: ignore
-    ingest_node, detect_node, reason_node,
+    detect_node, reason_node,
     reroute_node, coordination_node, alert_node, report_node,
-    supervisor_node, evaluate_previous_action, predict_node
+    supervisor_node, predict_node
 )
 
 workflow = StateGraph(AgentState)
-workflow.add_node("evaluate_previous_action", evaluate_previous_action)
-workflow.add_node("ingest_node", ingest_node)
 workflow.add_node("detect_node", detect_node)
 workflow.add_node("predict_node", predict_node)
 workflow.add_node("supervisor_node", supervisor_node)
@@ -19,7 +17,7 @@ workflow.add_node("coordination_node", coordination_node)
 workflow.add_node("alert_node", alert_node)
 workflow.add_node("report_node", report_node)
 
-workflow.set_entry_point("evaluate_previous_action")
+workflow.set_entry_point("supervisor_node")
 
 def route_from_supervisor(state: AgentState) -> str:
     next_node = state.get("next_node", "END")
@@ -27,13 +25,9 @@ def route_from_supervisor(state: AgentState) -> str:
         return END
     return next_node
 
-workflow.add_edge("evaluate_previous_action", "ingest_node")
-workflow.add_edge("ingest_node", "detect_node")
-workflow.add_edge("detect_node", "predict_node")
-workflow.add_edge("predict_node", "supervisor_node")
-
 # All worker nodes return back to the supervisor
 workflow.add_edge("detect_node", "supervisor_node")
+workflow.add_edge("predict_node", "supervisor_node")
 workflow.add_edge("reason_node", "supervisor_node")
 workflow.add_edge("reroute_node", "supervisor_node")
 workflow.add_edge("coordination_node", "supervisor_node")
@@ -46,6 +40,7 @@ workflow.add_conditional_edges(
     route_from_supervisor,
     {
         "detect_node": "detect_node",
+        "predict_node": "predict_node",
         "reason_node": "reason_node",
         "reroute_node": "reroute_node",
         "coordination_node": "coordination_node",
