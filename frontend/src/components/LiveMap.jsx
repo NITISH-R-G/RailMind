@@ -29,7 +29,7 @@ const ANIMATION_CSS = `
     width: 32px;
     height: 32px;
     border-radius: 50%;
-    border: 3px solid #ff3366;
+    border: 3px solid var(--color-critical);
     background: transparent;
     position: absolute;
     left: -16px;
@@ -38,16 +38,16 @@ const ANIMATION_CSS = `
     animation: shockwaveExpand 1.8s ease-out forwards;
   }
   .shockwave-ring.warning {
-    border-color: #ffb300;
+    border-color: var(--color-warning);
   }
   .leaflet-popup-content-wrapper {
-    background: #121820 !important;
-    border: 1px solid #1a2433 !important;
+    background: var(--bg-card) !important;
+    border: 1px solid var(--border-color) !important;
     border-radius: 0 !important;
-    box-shadow: 0 0 20px rgba(0,240,255,0.15) !important;
+    box-shadow: 0 0 20px rgba(0,255,102,0.15) !important;
     padding: 0 !important;
   }
-  .leaflet-popup-tip { background: #121820 !important; }
+  .leaflet-popup-tip { background: var(--bg-card) !important; }
   .leaflet-popup-content { margin: 0 !important; }
 `;
 
@@ -160,20 +160,28 @@ const getDetourCoords = (planText) => {
 };
 
 const createMarkerIcon = (status, delay, isSelected = false) => {
-  let color = '#00f0ff';
-  if (status === 'cancelled' || delay > 60) color = '#ff3366';
-  else if (status === 'delayed' || delay > 15) color = '#ffb300';
+  let color = 'var(--color-info)'; // Default nominal color
+  if (status === 'cancelled' || delay > 60) color = 'var(--color-critical)';
+  else if (status === 'delayed' || delay > 15) color = 'var(--color-warning)';
   const size = isSelected ? 16 : 10;
   const glow = isSelected ? `0 0 14px ${color}, 0 0 28px ${color}40` : `0 0 8px ${color}80`;
+
+  // Custom SVG train marker with dynamic orientation/rotation vectors (visual proxy, static angle for now, real dynamic angle would need prev coords)
+  const rotation = delay > 0 ? 45 : 0; // Simulated vector rotation
+
   return L.divIcon({
     html: `<div style="
       width:${size}px; height:${size}px;
-      background:${color};
-      border: 2px solid #fff;
-      border-radius: 50%;
-      box-shadow: ${glow};
+      display: flex;
+      align-items: center;
+      justify-content: center;
       transition: all 0.4s ease;
-    "></div>`,
+      transform: rotate(${rotation}deg);
+    ">
+      <svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="${color}" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="box-shadow: ${glow}; border-radius: 50%;">
+        <polygon points="12 2 22 22 12 18 2 22 12 2"></polygon>
+      </svg>
+    </div>`,
     className: 'train-position-marker',
     iconSize: [size, size],
     iconAnchor: [size / 2, size / 2],
@@ -191,7 +199,7 @@ const createShockwaveIcon = (severity) => {
 };
 
 // ─── Component: Animated Polyline (flowing dashes) ───────────────────────────
-function AnimatedPolyline({ positions, color = '#00f0ff', weight = 3, isDashed = false }) {
+function AnimatedPolyline({ positions, color = 'var(--color-info)', weight = 3, isDashed = false }) {
   const map = useMap();
   const polylineRef = useRef(null);
 
@@ -289,7 +297,7 @@ export default function LiveMap({ trains = [], incidents = [] }) {
       const prev = prevStationsRef.current[train.train_number];
       const curr = train.current_station || train.station_code;
       if (prev && prev !== curr && curr) {
-        const color = train.delay_minutes > 15 ? '#ffb300' : '#00f0ff';
+        const color = train.delay_minutes > 15 ? 'var(--color-warning)' : 'var(--color-info)';
         const delayStr = train.delay_minutes > 0 ? ` — ${train.delay_minutes}m delay` : ' — On Time';
         addToast(
           `${train.train_number}-${Date.now()}`,
@@ -370,7 +378,7 @@ export default function LiveMap({ trains = [], incidents = [] }) {
         {/* Feature A: Comet Trail Dots */}
         {Object.entries(trailDots).map(([trainNo, dots]) => {
           const train = activeTrains.find(t => t.train_number === trainNo);
-          const color = train?.delay_minutes > 60 ? '#ff3366' : train?.delay_minutes > 15 ? '#ffb300' : '#00f0ff';
+          const color = train?.delay_minutes > 60 ? 'var(--color-critical)' : train?.delay_minutes > 15 ? 'var(--color-warning)' : 'var(--color-info)';
           return dots.slice(0, -1).map((dot, i) => {
             const opacity = (i + 1) / dots.length * 0.45;
             const radius  = 2 + i * 0.6;
@@ -396,13 +404,13 @@ export default function LiveMap({ trains = [], incidents = [] }) {
             {detourCoords ? (
               <>
                 {originalCoords.length > 1 && (
-                  <Polyline positions={originalCoords} pathOptions={{ color: '#2a3a4a', weight: 2, dashArray: '4, 6', opacity: 0.5 }} />
+                  <Polyline positions={originalCoords} pathOptions={{ color: 'var(--border-color)', weight: 2, dashArray: '4, 6', opacity: 0.5 }} />
                 )}
-                <AnimatedPolyline positions={detourCoords} color="#ff3366" weight={4} isDashed={true} />
+                <AnimatedPolyline positions={detourCoords} color="var(--color-critical)" weight={4} isDashed={true} />
               </>
             ) : (
               originalCoords.length > 1 && (
-                <AnimatedPolyline positions={originalCoords} color="#00f0ff" weight={3} />
+                <AnimatedPolyline positions={originalCoords} color="var(--color-info)" weight={3} />
               )
             )}
           </>
@@ -423,7 +431,7 @@ export default function LiveMap({ trains = [], incidents = [] }) {
           const isCritical = delay > 60 || train.status?.toLowerCase() === 'cancelled';
           const isDelayed = delay > 15;
           const statusText = isCritical ? 'CRITICAL' : isDelayed ? 'DELAYED' : 'ON TIME';
-          const statusColor = isCritical ? '#ff3366' : isDelayed ? '#ffb300' : '#00f0ff';
+          const statusColor = isCritical ? 'var(--color-critical)' : isDelayed ? 'var(--color-warning)' : 'var(--color-info)';
           const hasApprovedDetour = (incidents || []).some(
             inc => inc.train_number === train.train_number && inc.approved && inc.reroute_plan
           );
@@ -459,7 +467,7 @@ export default function LiveMap({ trains = [], incidents = [] }) {
                     {train.train_name || 'Express Train'}
                   </h3>
 
-                  <div style={{ display: 'flex', gap: '12px', fontSize: '10px', color: '#8a9ba8', marginBottom: '10px' }}>
+                  <div style={{ display: 'flex', gap: '12px', fontSize: '10px', color: 'var(--text-secondary)', marginBottom: '10px' }}>
                     <span>⚡ {train.speed || '80 km/h'}</span>
                     <span>📍 {train.current_station || '—'}</span>
                   </div>
@@ -468,20 +476,20 @@ export default function LiveMap({ trains = [], incidents = [] }) {
                     <div style={{
                       marginBottom: '10px', padding: '6px 8px',
                       backgroundColor: 'rgba(255,51,102,0.1)',
-                      border: '1px solid #ff3366',
-                      fontSize: '10px', color: '#ff3366'
+                      border: '1px solid var(--color-critical)',
+                      fontSize: '10px', color: 'var(--color-critical)'
                     }}>
                       <strong>DETOUR ACTIVE</strong> — Bypassing affected track segment
                     </div>
                   )}
 
-                  <div style={{ height: '1px', backgroundColor: '#1a2433', margin: '8px 0' }} />
+                  <div style={{ height: '1px', backgroundColor: 'var(--border-color)', margin: '8px 0' }} />
 
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px' }}>
-                    <span style={{ color: '#5c7080' }}>
-                      NEXT: <strong style={{ color: '#e2e8f0' }}>{train.next_station || '—'}</strong>
+                    <span style={{ color: 'var(--text-muted)' }}>
+                      NEXT: <strong style={{ color: 'var(--text-primary)' }}>{train.next_station || '—'}</strong>
                     </span>
-                    <span style={{ color: '#00f0ff' }}>{train.distance_next || '—'}</span>
+                    <span style={{ color: 'var(--color-info)' }}>{train.distance_next || '—'}</span>
                   </div>
 
                   <div style={{ marginTop: '8px', fontSize: '9px', color: '#3a4a5a', textAlign: 'center' }}>
@@ -515,12 +523,12 @@ function LiveClockBadge() {
     <div style={{
       position: 'absolute', top: '12px', right: '12px',
       zIndex: 1000,
-      backgroundColor: 'rgba(8,10,13,0.85)',
-      border: '1px solid #1a2433',
+      backgroundColor: 'rgba(10,14,23,0.85)',
+      border: '1px solid var(--border-color)',
       padding: '6px 12px',
       fontFamily: "'JetBrains Mono', monospace",
       fontSize: '11px',
-      color: '#00f0ff',
+      color: 'var(--color-info)',
       letterSpacing: '0.5px',
       backdropFilter: 'blur(6px)',
     }}>

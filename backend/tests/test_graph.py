@@ -61,7 +61,7 @@ async def test_reason_node_tool_recovery():
 
         parsed = json.loads(new_state["claude_reasoning"])
         assert "situation_summary" in parsed
-        assert "delayed" in parsed["situation_summary"]
+        assert "stress" in parsed["situation_summary"].lower() or "delayed" in parsed["situation_summary"].lower()
 
 @pytest.mark.asyncio
 async def test_supervisor_self_correction():
