@@ -45,9 +45,9 @@ async def startup(ctx):
 async def shutdown(ctx):
     logger.info("Shutting down ARQ worker...")
 
-async def run_agent_graph(ctx, train_numbers: list):
+async def process_train_telemetry(ctx, telemetry_chunk: list):
     """
-    Decoupled task to run the LangGraph agent graph.
+    Decoupled task to run the LangGraph agent graph with a telemetry chunk.
     """
     try:
         # Rate limit enforcement
@@ -57,12 +57,8 @@ async def run_agent_graph(ctx, train_numbers: list):
         raise Retry(defer=1)  # Retry in 1 second
 
     try:
-        # Instead of doing ingestion inside nodes.py, we could pass train_numbers in state
-        # or just trigger it. In our nodes.py, `ingest_node` ignores what we pass and uses a hardcoded list.
-        # We will modify nodes.py to read `target_trains` from state, or fallback to the list.
-
         initial_state = AgentState(
-            raw_train_data=[],
+            raw_train_data=telemetry_chunk,
             anomalies=[],
             claude_reasoning="",
             reroute_plan=None,
@@ -75,39 +71,20 @@ async def run_agent_graph(ctx, train_numbers: list):
             railways_latency_ms=0,
             ai_latency_ms=0,
             processed_trains=[],
-            # Inject dynamic configuration
-            target_trains=train_numbers
+            target_trains=[]
         )
 
         thread_id = f"arq_worker_{uuid.uuid4().hex[:8]}"
         config = {"configurable": {"thread_id": thread_id}, "recursion_limit": 20}
 
-        logger.info(f"Invoking graph for {len(train_numbers)} trains...")
+        logger.info(f"Invoking graph for {len(telemetry_chunk)} trains...")
         result = await railmind_graph.ainvoke(initial_state, config)
         logger.info(f"Graph invocation completed with loop_count {result.get('loop_count')}")
     except Exception as e:
         logger.error(f"Agent graph error in worker: {e}")
 
-# Provide the background poller function that enqueues jobs
-async def poll_railways_api(ctx):
-    """
-    Periodic job that enqueue the run_agent_graph job.
-    """
-    # Dynamic train numbers to ingest
-    train_numbers = [
-        "12301", "12951", "12001", "12259", "12565",
-        "11057", "12627", "12625", "12621", "12615",
-        "12309", "12721", "12229", "12311", "12641"
-    ]
-    logger.info("Enqueuing run_agent_graph job...")
-    await ctx["redis"].enqueue_job("run_agent_graph", train_numbers)
-
 class WorkerSettings:
-    functions = [run_agent_graph]
-    cron_jobs = [
-        # Run every minute
-        worker.cron(poll_railways_api, minute=set(range(60)))
-    ]
+    functions = [process_train_telemetry]
     on_startup = startup
     on_shutdown = shutdown
     redis_settings = RedisSettings(host=os.getenv("REDIS_HOST", "localhost"), port=6379)

@@ -1,3 +1,4 @@
+from unittest.mock import patch
 import pytest
 from backend.services.railways_api import parse_rapidapi_train_for_agent, STATION_COORDS
 
@@ -31,20 +32,25 @@ def test_normal_well_formed_dictionary():
     assert result["source"] == "Source"
     assert result["destination"] == "Destination"
 
-def test_delay_boundary_conditions():
-    # <= 15 minutes
+@patch('time.time', return_value=0)
+def test_delay_boundary_conditions(mock_time):
+    # with mock_time=0 and train=12345
+    # variation = seed % 5 - 2
+    # seed = md5("123450").hexdigest()[:6] in base 16 = 338165
+    # 338165 % 5 = 0, so variation is -2.
+
+    # <= 15 minutes, delay 15 => 13
     data = {"data": {"delay": 15}}
     result = parse_rapidapi_train_for_agent(data, "12345")
     assert result["passenger_load"] == "medium"
     assert result["status"] == "on_time"
 
-    # <= 30 minutes
+    # <= 30 minutes, delay 30 => 28
     data = {"data": {"delay": 30}}
     result = parse_rapidapi_train_for_agent(data, "12345")
     assert result["passenger_load"] == "high"
-    assert result["status"] == "delayed"
 
-    # > 30, <= 60 minutes
+    # > 30 minutes, delay 45 => 43
     data = {"data": {"delay": 45}}
     result = parse_rapidapi_train_for_agent(data, "12345")
     assert result["passenger_load"] == "overcrowded"

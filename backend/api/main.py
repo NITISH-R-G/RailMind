@@ -9,7 +9,9 @@ env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__
 load_dotenv(dotenv_path=env_path)
 
 import secrets
-from fastapi import FastAPI, WebSocket, HTTPException, Depends, status
+from fastapi import FastAPI, WebSocket, HTTPException, Depends, status, Request, Body
+from arq import create_pool # type: ignore
+from arq.connections import RedisSettings # type: ignore
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from ..services.db_client import db_client
@@ -78,66 +80,11 @@ latest_agent_state = {
 }
 
 
-async def run_agent_loop_fallback():
-    from ..agents.graph import railmind_graph
-    from ..agents.state import AgentState
-    import uuid
-    train_numbers = [
-        "12301", "12951", "12001", "12259", "12565",
-        "11057", "12627", "12625", "12621", "12615",
-        "12309", "12721", "12229", "12311", "12641"
-    ]
-    processed_trains = []
-    
-    # Wait a few seconds for startup to settle
-    await asyncio.sleep(5)
-    
-    while True:
-        try:
-            print("[RAILMIND] Local background agent loop run starting...")
-            initial_state = AgentState(
-                raw_train_data=[],
-                anomalies=[],
-                claude_reasoning="",
-                reroute_plan=None,
-                department_tasks=[],
-                sms_alerts_sent=[],
-                incident_report=None,
-                loop_count=0,
-                should_continue=False,
-                last_api_call="Never",
-                railways_latency_ms=0,
-                ai_latency_ms=0,
-                processed_trains=processed_trains,
-                target_trains=train_numbers
-            )
-            thread_id = f"local_bg_{uuid.uuid4().hex[:8]}"
-            config = {"configurable": {"thread_id": thread_id}, "recursion_limit": 20}
-            result = await railmind_graph.ainvoke(initial_state, config)
-            if result:
-                processed_trains = result.get("processed_trains", [])
-                latest_agent_state.update({
-                    "raw_train_data": result.get("raw_train_data", []),
-                    "anomalies": result.get("anomalies", []),
-                    "claude_reasoning": result.get("claude_reasoning", ""),
-                    "reroute_plan": result.get("reroute_plan"),
-                    "department_tasks": result.get("department_tasks", []),
-                    "sms_alerts_sent": result.get("sms_alerts_sent", []),
-                    "incident_report": result.get("incident_report"),
-                    "loop_count": result.get("loop_count", 0),
-                    "should_continue": result.get("should_continue", False),
-                    "last_api_call": result.get("last_api_call", "Never"),
-                    "railways_latency_ms": result.get("railways_latency_ms", 0),
-                    "ai_latency_ms": result.get("ai_latency_ms", 0),
-                    "processed_trains": processed_trains
-                })
-            print("[RAILMIND] Local background agent loop run completed.")
-        except Exception as e:
-            print(f"[RAILMIND] Local background agent loop failed: {e}")
-        await asyncio.sleep(60)
+
 
 @app.on_event("startup")
 async def startup_event():
+    app.state.redis_pool = await create_pool(RedisSettings(host=os.getenv("REDIS_HOST", "localhost"), port=6379))
     # Test connection on startup and clean collections:
     try:
         from ..services.db_client import client, db
@@ -152,11 +99,44 @@ async def startup_event():
     except Exception as e:
         print(f"[RAILMIND] MongoDB connection/cleanup failed: {e}")
 
-    # Run the agent workflow loop asynchronously in the background on API startup
-    asyncio.create_task(run_agent_loop_fallback())
+
 
 # Include general REST routers
 app.include_router(router, prefix="/api")
+
+@app.post("/api/telemetry/ingest")
+async def ingest_telemetry(request: Request, telemetry_data: list = Body(...)):
+
+    client_ip = request.client.host if request.client else "unknown"
+    redis_client = app.state.redis_pool
+
+    # ZSET-based sliding-window rate limit: max 10 requests per 10 seconds per IP
+    window_size_seconds = 10
+    max_requests = 10
+    current_time = datetime.utcnow().timestamp()
+    key = f"rate_limit:{client_ip}"
+
+    async with redis_client.pipeline(transaction=True) as pipe:
+        # Remove old requests
+        await pipe.zremrangebyscore(key, 0, current_time - window_size_seconds)
+        # Add current request
+        await pipe.zadd(key, {str(current_time): current_time})
+        # Count remaining requests
+        await pipe.zcard(key)
+        # Set expiry for cleanup
+        await pipe.expire(key, window_size_seconds)
+        results = await pipe.execute()
+
+    request_count = results[2]
+
+    if request_count > max_requests:
+        raise HTTPException(status_code=429, detail="Rate limit exceeded")
+
+    # Enqueue to ARQ worker
+    await app.state.redis_pool.enqueue_job("process_train_telemetry", telemetry_data)
+
+    return {"status": "success", "message": f"Enqueued {len(telemetry_data)} train updates"}
+
 
 # Mounting direct WebSocket handler
 @app.websocket("/ws")
