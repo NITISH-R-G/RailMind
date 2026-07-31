@@ -19,7 +19,7 @@ workflow.add_node("coordination_node", coordination_node)
 workflow.add_node("alert_node", alert_node)
 workflow.add_node("report_node", report_node)
 
-workflow.set_entry_point("evaluate_previous_action")
+workflow.set_entry_point("supervisor_node")
 
 def route_from_supervisor(state: AgentState) -> str:
     next_node = state.get("next_node", "END")
@@ -27,25 +27,26 @@ def route_from_supervisor(state: AgentState) -> str:
         return END
     return next_node
 
-workflow.add_edge("evaluate_previous_action", "ingest_node")
-workflow.add_edge("ingest_node", "detect_node")
-workflow.add_edge("detect_node", "predict_node")
-workflow.add_edge("predict_node", "supervisor_node")
-
 # All worker nodes return back to the supervisor
+workflow.add_edge("evaluate_previous_action", "supervisor_node")
+workflow.add_edge("ingest_node", "supervisor_node")
 workflow.add_edge("detect_node", "supervisor_node")
+workflow.add_edge("predict_node", "supervisor_node")
 workflow.add_edge("reason_node", "supervisor_node")
 workflow.add_edge("reroute_node", "supervisor_node")
 workflow.add_edge("coordination_node", "supervisor_node")
 workflow.add_edge("alert_node", "supervisor_node")
-workflow.add_edge("report_node", END)
+workflow.add_edge("report_node", "supervisor_node")
 
 # Supervisor dynamically dispatches
 workflow.add_conditional_edges(
     "supervisor_node",
     route_from_supervisor,
     {
+        "evaluate_previous_action": "evaluate_previous_action",
+        "ingest_node": "ingest_node",
         "detect_node": "detect_node",
+        "predict_node": "predict_node",
         "reason_node": "reason_node",
         "reroute_node": "reroute_node",
         "coordination_node": "coordination_node",
