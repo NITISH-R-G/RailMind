@@ -195,8 +195,9 @@ Previous errors from Supervisor (if any, please correct your plan):
             SystemMessage(content=system_prompt),
             HumanMessage(content=user_prompt)
         ]
-        from langgraph.prebuilt import create_react_agent
+        from langchain.agents import create_agent
 
+        from langgraph.prebuilt import create_react_agent
         agent = create_react_agent(llm, tools)
 
         # Run autonomous tool-calling loop
@@ -206,7 +207,7 @@ Previous errors from Supervisor (if any, please correct your plan):
         # Now that tool usage is done, force structured output
         structured_llm = llm.with_structured_output(MitigationPlan)
         final_plan: MitigationPlan = await structured_llm.ainvoke(final_messages)
-        return final_plan.dict()
+        return final_plan.model_dump()
     except Exception as e:
         print(f"[RAILMIND] AI Reasoning or structured output failed, generating high-fidelity fallback: {e}")
         # Return dynamic fallback based on current anomaly parameters
