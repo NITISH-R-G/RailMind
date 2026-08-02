@@ -31,22 +31,28 @@ def test_normal_well_formed_dictionary():
     assert result["source"] == "Source"
     assert result["destination"] == "Destination"
 
-def test_delay_boundary_conditions():
+from unittest.mock import patch
+
+@patch('time.time', return_value=100000) # Mock time for deterministic variation
+def test_delay_boundary_conditions(mock_time):
     # <= 15 minutes
-    data = {"data": {"delay": 15}}
+    # Variation for train 12345 is +1, so starting at 14 makes it 15 (medium).
+    data = {"data": {"delay": 14}}
     result = parse_rapidapi_train_for_agent(data, "12345")
     assert result["passenger_load"] == "medium"
     assert result["status"] == "on_time"
 
     # <= 30 minutes
-    data = {"data": {"delay": 30}}
+    data = {"data": {"delay": 29}}
     result = parse_rapidapi_train_for_agent(data, "12345")
+    # delay 30 => high
     assert result["passenger_load"] == "high"
     assert result["status"] == "delayed"
 
     # > 30, <= 60 minutes
-    data = {"data": {"delay": 45}}
+    data = {"data": {"delay": 44}}
     result = parse_rapidapi_train_for_agent(data, "12345")
+    # delay 45 => overcrowded
     assert result["passenger_load"] == "overcrowded"
     assert result["status"] == "delayed"
 

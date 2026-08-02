@@ -60,6 +60,9 @@ app.add_middleware(
 api_key = os.getenv("RAILWAYS_API_KEY", "mock_key")
 railways_client = RailwaysAPIClient(api_key=api_key)
 
+from arq import create_pool
+from arq.connections import RedisSettings
+
 # Global reference storing the most recent loop state from the agent background thread
 latest_agent_state = {
     "raw_train_data": [],
@@ -77,65 +80,6 @@ latest_agent_state = {
     "processed_trains": []
 }
 
-
-async def run_agent_loop_fallback():
-    from ..agents.graph import railmind_graph
-    from ..agents.state import AgentState
-    import uuid
-    train_numbers = [
-        "12301", "12951", "12001", "12259", "12565",
-        "11057", "12627", "12625", "12621", "12615",
-        "12309", "12721", "12229", "12311", "12641"
-    ]
-    processed_trains = []
-    
-    # Wait a few seconds for startup to settle
-    await asyncio.sleep(5)
-    
-    while True:
-        try:
-            print("[RAILMIND] Local background agent loop run starting...")
-            initial_state = AgentState(
-                raw_train_data=[],
-                anomalies=[],
-                claude_reasoning="",
-                reroute_plan=None,
-                department_tasks=[],
-                sms_alerts_sent=[],
-                incident_report=None,
-                loop_count=0,
-                should_continue=False,
-                last_api_call="Never",
-                railways_latency_ms=0,
-                ai_latency_ms=0,
-                processed_trains=processed_trains,
-                target_trains=train_numbers
-            )
-            thread_id = f"local_bg_{uuid.uuid4().hex[:8]}"
-            config = {"configurable": {"thread_id": thread_id}, "recursion_limit": 20}
-            result = await railmind_graph.ainvoke(initial_state, config)
-            if result:
-                processed_trains = result.get("processed_trains", [])
-                latest_agent_state.update({
-                    "raw_train_data": result.get("raw_train_data", []),
-                    "anomalies": result.get("anomalies", []),
-                    "claude_reasoning": result.get("claude_reasoning", ""),
-                    "reroute_plan": result.get("reroute_plan"),
-                    "department_tasks": result.get("department_tasks", []),
-                    "sms_alerts_sent": result.get("sms_alerts_sent", []),
-                    "incident_report": result.get("incident_report"),
-                    "loop_count": result.get("loop_count", 0),
-                    "should_continue": result.get("should_continue", False),
-                    "last_api_call": result.get("last_api_call", "Never"),
-                    "railways_latency_ms": result.get("railways_latency_ms", 0),
-                    "ai_latency_ms": result.get("ai_latency_ms", 0),
-                    "processed_trains": processed_trains
-                })
-            print("[RAILMIND] Local background agent loop run completed.")
-        except Exception as e:
-            print(f"[RAILMIND] Local background agent loop failed: {e}")
-        await asyncio.sleep(60)
-
 @app.on_event("startup")
 async def startup_event():
     # Test connection on startup and clean collections:
@@ -152,8 +96,14 @@ async def startup_event():
     except Exception as e:
         print(f"[RAILMIND] MongoDB connection/cleanup failed: {e}")
 
-    # Run the agent workflow loop asynchronously in the background on API startup
-    asyncio.create_task(run_agent_loop_fallback())
+    # Initialize ARQ Redis pool and store in app.state
+    try:
+        redis_host = os.getenv("REDIS_HOST", "localhost")
+        app.state.redis_pool = await create_pool(RedisSettings(host=redis_host, port=6379))
+        print(f"[RAILMIND] ARQ Redis Pool initialized at {redis_host}:6379 [OK]")
+    except Exception as e:
+        print(f"[RAILMIND] Failed to initialize ARQ Redis Pool: {e}")
+        app.state.redis_pool = None
 
 # Include general REST routers
 app.include_router(router, prefix="/api")
@@ -162,6 +112,23 @@ app.include_router(router, prefix="/api")
 @app.websocket("/ws")
 async def ws_endpoint(websocket: WebSocket):
     await websocket_endpoint(websocket)
+
+from pydantic import BaseModel
+from typing import List
+
+class TelemetryChunk(BaseModel):
+    trains: List[dict]
+
+@app.post("/api/telemetry/ingest")
+async def ingest_telemetry_api(chunk: TelemetryChunk):
+    if not app.state.redis_pool:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Task queue unavailable")
+    try:
+        # Enqueue the background processing task for ARQ
+        await app.state.redis_pool.enqueue_job('process_train_telemetry', chunk.trains)
+        return {"status": "enqueued", "count": len(chunk.trains)}
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 # REST Endpoint: GET /api/incidents - Fetch last 20 incidents (last 24h by default, or all=true)
 @app.get("/api/incidents")
