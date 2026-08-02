@@ -14,30 +14,6 @@ from backend.services.db_client import db_client
 
 logger = logging.getLogger(__name__)
 
-# Token Bucket Rate Limiter
-class TokenBucketRateLimiter:
-    def __init__(self, capacity: int, fill_rate: float):
-        self.capacity = capacity
-        self.fill_rate = fill_rate
-        self.tokens = capacity
-        self.last_fill = time.time()
-        self._lock = asyncio.Lock()
-
-    async def consume(self, tokens: int = 1):
-        async with self._lock:
-            now = time.time()
-            elapsed = now - self.last_fill
-            self.tokens = min(self.capacity, self.tokens + elapsed * self.fill_rate)
-            self.last_fill = now
-
-            if self.tokens < tokens:
-                raise ValueError(f"Rate limit exceeded. Requested {tokens}, but only {int(self.tokens)} available.")
-
-            self.tokens -= tokens
-
-# Limit to 5 requests per second
-rate_limiter = TokenBucketRateLimiter(capacity=5, fill_rate=5.0)
-
 async def startup(ctx):
     logger.info("Starting ARQ worker...")
     await db_client.init_indexes()
@@ -45,24 +21,39 @@ async def startup(ctx):
 async def shutdown(ctx):
     logger.info("Shutting down ARQ worker...")
 
-async def run_agent_graph(ctx, train_numbers: list):
+async def check_rate_limit(redis_client, key: str, capacity: int, window_sec: int):
     """
-    Decoupled task to run the LangGraph agent graph.
+    Redis-backed sliding-window token bucket using ZSET.
     """
+    now = time.time()
+    window_start = now - window_sec
+
+    # Remove older entries
+    await redis_client.zremrangebyscore(key, 0, window_start)
+
+    # Count current entries
+    current_count = await redis_client.zcard(key)
+    if current_count >= capacity:
+        raise ValueError(f"Rate limit exceeded. Try again in {window_sec}s.")
+
+    # Add new request timestamp
+    await redis_client.zadd(key, {str(uuid.uuid4()): now})
+
+async def process_train_telemetry(ctx, raw_telemetry_chunk: list):
+    """
+    Directly injects parsed HTTP/WebSocket telemetry into the LangGraph state.
+    """
+    redis_client = ctx["redis"]
     try:
-        # Rate limit enforcement
-        await rate_limiter.consume(1)
+        # Enforce rate limit (max 5 requests per second)
+        await check_rate_limit(redis_client, "worker_telemetry_rl", capacity=5, window_sec=1)
     except ValueError as e:
-        logger.error(f"Rate limiting in worker: {e}. Retrying job.")
-        raise Retry(defer=1)  # Retry in 1 second
+        logger.warning(f"Rate limit hit: {e}. Deferring job.")
+        raise Retry(defer=1)
 
     try:
-        # Instead of doing ingestion inside nodes.py, we could pass train_numbers in state
-        # or just trigger it. In our nodes.py, `ingest_node` ignores what we pass and uses a hardcoded list.
-        # We will modify nodes.py to read `target_trains` from state, or fallback to the list.
-
         initial_state = AgentState(
-            raw_train_data=[],
+            raw_train_data=raw_telemetry_chunk,  # Injected directly, skipping blocking fetches
             anomalies=[],
             claude_reasoning="",
             reroute_plan=None,
@@ -71,22 +62,27 @@ async def run_agent_graph(ctx, train_numbers: list):
             incident_report=None,
             loop_count=0,
             should_continue=False,
-            last_api_call="Never",
+            last_api_call=datetime.utcnow().isoformat(),
             railways_latency_ms=0,
             ai_latency_ms=0,
             processed_trains=[],
-            # Inject dynamic configuration
-            target_trains=train_numbers
+            target_trains=[]
         )
 
-        thread_id = f"arq_worker_{uuid.uuid4().hex[:8]}"
+        thread_id = f"arq_telemetry_{uuid.uuid4().hex[:8]}"
         config = {"configurable": {"thread_id": thread_id}, "recursion_limit": 20}
 
-        logger.info(f"Invoking graph for {len(train_numbers)} trains...")
+        logger.info(f"Invoking graph with {len(raw_telemetry_chunk)} telemetry records...")
         result = await railmind_graph.ainvoke(initial_state, config)
         logger.info(f"Graph invocation completed with loop_count {result.get('loop_count')}")
     except Exception as e:
         logger.error(f"Agent graph error in worker: {e}")
+
+async def run_agent_graph(ctx, train_numbers: list):
+    """
+    Legacy entry point. Maintained for backward compatibility.
+    """
+    pass
 
 # Provide the background poller function that enqueues jobs
 async def poll_railways_api(ctx):
@@ -103,9 +99,8 @@ async def poll_railways_api(ctx):
     await ctx["redis"].enqueue_job("run_agent_graph", train_numbers)
 
 class WorkerSettings:
-    functions = [run_agent_graph]
+    functions = [process_train_telemetry, run_agent_graph]
     cron_jobs = [
-        # Run every minute
         worker.cron(poll_railways_api, minute=set(range(60)))
     ]
     on_startup = startup

@@ -60,50 +60,11 @@ async def evaluate_previous_action(state: AgentState) -> AgentState:
     try:
         await log_agent("evaluate_previous_action", "[RAILMIND] Checking and evaluating previous self-healing actions...")
         
-        # Pre-ingest live train status if raw_train_data is empty (since this node runs first)
+        # In decoupled architecture, state["raw_train_data"] is provided by the worker
+        # We no longer block and fetch here.
         if not state.get("raw_train_data"):
-            train_numbers = [
-                "12301", "12951", "12001", "12259", "12565",
-                "11057", "12627", "12625", "12621", "12615",
-                "12309", "12721", "12229", "12311", "12641"
-            ]
-            import time
-            start_time = time.time()
-            client = railways_client
-            print(f"[RAILMIND] Pre-ingesting Railways API for {len(train_numbers)} trains...")
-            results = await client.get_multiple_trains(train_numbers)
-            
-            train_results = []
-            for tn in train_numbers:
-                found = False
-                for r in results:
-                    if r.get("train_number") == tn:
-                        train_results.append(r)
-                        found = True
-                        break
-                if not found:
-                    from ..services.railways_api import get_mock_rapidapi_train, parse_rapidapi_train_for_agent
-                    mock_data = get_mock_rapidapi_train(tn)
-                    parsed_mock = parse_rapidapi_train_for_agent(mock_data, tn)
-                    if parsed_mock:
-                        train_results.append(parsed_mock)
-            
-            cancelled = await get_cancelled_trains()
-            live_trains = train_results.copy()
-            for train in cancelled:
-                live_trains.append({
-                    "train_number": train.get("TrainNo", "Unknown"),
-                    "train_name": train.get("TrainName", "Unknown"),
-                    "status": "cancelled",
-                    "delay_minutes": 999,
-                    "passenger_load": "overcrowded",
-                    "current_station": "Unknown",
-                    "lat": 20.5937,
-                    "lng": 78.9629
-                })
-            state["raw_train_data"] = live_trains
-            state["last_api_call"] = datetime.utcnow().isoformat()
-            state["railways_latency_ms"] = int((time.time() - start_time) * 1000)
+            await log_agent("evaluate_previous_action", "[RAILMIND] No raw train data in state. Skipping evaluation.")
+            return state
 
         # Evaluate pending incidents
         for train in state.get("raw_train_data", []):
@@ -154,82 +115,16 @@ async def evaluate_previous_action(state: AgentState) -> AgentState:
 
 async def ingest_node(state: AgentState) -> AgentState:
     try:
-        await log_agent("SCANNING", "Polling 15 trains on Indian Railways...")
-        # If evaluate_previous_action already populated the raw train data, reuse it
-        if state.get("raw_train_data"):
-            live_trains = state["raw_train_data"]
-        else:
-            train_numbers = state.get("target_trains")
-            if not train_numbers:
-                train_numbers = [
-                    "12301", "12951", "12001", "12259", "12565",
-                    "11057", "12627", "12625", "12621", "12615",
-                    "12309", "12721", "12229", "12311", "12641",
-                    "12438", "ICE"
-                ]
-            
-            import time
-            start_time = time.time()
-            
-            client = railways_client
-            print(f"[RAILMIND] Calling Railways API for {len(train_numbers)} trains...")
-            results = await client.get_multiple_trains(train_numbers)
-            
-            # Ensure that if some train fetches failed and returned empty dict, they fallback to get_mock_rapidapi_train
-            # So we always have all 15 trains
-            train_results = []
-            for tn in train_numbers:
-                found = False
-                for r in results:
-                    if r.get("train_number") == tn:
-                        train_results.append(r)
-                        found = True
-                        break
-                if not found:
-                    from ..services.railways_api import get_mock_rapidapi_train, parse_rapidapi_train_for_agent
-                    mock_data = get_mock_rapidapi_train(tn)
-                    parsed_mock = parse_rapidapi_train_for_agent(mock_data, tn)
-                    if parsed_mock:
-                        train_results.append(parsed_mock)
-            
-            results = train_results
-            
-            latency = int((time.time() - start_time) * 1000)
-            state["last_api_call"] = datetime.utcnow().isoformat()
-            state["railways_latency_ms"] = latency
-            
-            print(f"[RAILMIND] API returned {len(results)} trains")
-            print(f"[RAILMIND] Sample: {results[0] if results else 'EMPTY - using mock'}")
-            
-            if not results:
-                print("[RAILMIND] WARNING: Railways API returned no data, check RAILWAYS_API_KEY in .env")
-                await log_agent("ingest_node", "[RAILMIND] WARNING: Railways API returned no data, check RAILWAYS_API_KEY in .env")
-                results = mock_train_data()
-                print("[RAILMIND] Using mock fallback data")
-                await log_agent("ingest_node", "[RAILMIND] Using mock fallback data")
-                
-            cancelled = await get_cancelled_trains()
-            live_trains = results.copy()
-            for train in cancelled:
-                live_trains.append({
-                    "train_number": train.get("TrainNo", "Unknown"),
-                    "train_name": train.get("TrainName", "Unknown"),
-                    "status": "cancelled",
-                    "delay_minutes": 999,
-                    "passenger_load": "overcrowded",
-                    "current_station": "Unknown",
-                    "lat": 20.5937,
-                    "lng": 78.9629
-                })
+        await log_agent("SCANNING", "Processing pre-fetched telemetry...")
+        live_trains = state.get("raw_train_data", [])
         
         for train in live_trains:
             await websocket_manager.broadcast(json.dumps({
                 "type": "TRAIN_UPDATE",
                 "data": train
             }))
-        
-        state["raw_train_data"] = live_trains
-        await log_agent("ingest_node", f"[RAILMIND] Ingested {len(live_trains)} trains")
+
+        await log_agent("ingest_node", f"[RAILMIND] Broadcasted telemetry for {len(live_trains)} trains")
     except Exception as e:
         logger.error(f"Error in ingest_node: {e}")
         await log_agent("ingest_node", f"[RAILMIND] [ERROR] Ingest node failed: {e}")
@@ -1119,14 +1014,23 @@ async def alert_node(state: AgentState) -> AgentState:
     return {}
 
 async def save_incident_if_not_duplicate(incident):
-    # Check last 5 minutes for same train number
-    duplicate = await db_client.has_recent_incident(incident["train_number"], minutes=5)
+    # Calculate a 5-minute bucketed window for idempotency
+    now = datetime.utcnow()
+    # Floor to nearest 5 minutes (e.g. 10:04 -> 10:00, 10:06 -> 10:05)
+    minute_bucket = now.minute - (now.minute % 5)
+    timestamp_window = now.replace(minute=minute_bucket, second=0, microsecond=0).isoformat()
     
-    if duplicate:
-        print(f"[RAILMIND] Skipping duplicate incident for train {incident['train_number']} (last logged in the last 5 minutes)")
+    incident["timestamp_window"] = timestamp_window
+    
+    # insert_incident relies on the unique compound index
+    # [("train_number", 1), ("timestamp_window", 1)]
+    # to catch DuplicateKeyError.
+    saved = await db_client.insert_incident(incident)
+
+    if not saved:
+        print(f"[RAILMIND] Skipping duplicate incident for train {incident['train_number']} (already logged in this 5-minute window)")
         return False
-    
-    await db_client.insert_incident(incident)
+
     print(f"[RAILMIND] New incident saved: {incident['incident_title']}")
     return True
 
