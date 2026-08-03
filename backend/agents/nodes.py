@@ -160,42 +160,28 @@ async def evaluate_previous_action(state: AgentState) -> dict:
 async def ingest_node(state: AgentState) -> dict:
     try:
         await log_agent("SCANNING", "Polling 15 trains on Indian Railways...")
-        # If evaluate_previous_action already populated the raw train data, reuse it
         if state.get("raw_train_data"):
             live_trains = state["raw_train_data"]
         else:
-            train_numbers = state.get("target_trains")
-            if not train_numbers:
-                train_numbers = [
-                    "12301", "12951", "12001", "12259", "12565",
-                    "11057", "12627", "12625", "12621", "12615",
-                    "12309", "12721", "12229", "12311", "12641",
-                    "12438", "ICE"
-                ]
+            train_numbers = state.get("target_trains") or ["12301", "12951", "12001", "12259", "12565", "11057", "12627", "12625", "12621", "12615", "12309", "12721", "12229", "12311", "12641", "12438", "ICE"]
             
             import time
             start_time = time.time()
             
-            client = railways_client
             print(f"[RAILMIND] Calling Railways API for {len(train_numbers)} trains...")
-            results = await client.get_multiple_trains(train_numbers)
+            results = await railways_client.get_multiple_trains(train_numbers)
             
-            # Ensure that if some train fetches failed and returned empty dict, they fallback to get_mock_rapidapi_train
-            # So we always have all 15 trains
             train_results = []
             for tn in train_numbers:
-                found = False
-                for r in results:
-                    if r.get("train_number") == tn:
-                        train_results.append(r)
-                        found = True
-                        break
-                if not found:
+                r = next((x for x in results if x.get("train_number") == tn), None)
+                if not r:
                     from ..services.railways_api import get_mock_rapidapi_train, parse_rapidapi_train_for_agent
                     mock_data = get_mock_rapidapi_train(tn)
                     parsed_mock = parse_rapidapi_train_for_agent(mock_data, tn)
                     if parsed_mock:
                         train_results.append(parsed_mock)
+                else:
+                    train_results.append(r)
             
             results = train_results
             
@@ -203,15 +189,9 @@ async def ingest_node(state: AgentState) -> dict:
             state["last_api_call"] = datetime.utcnow().isoformat()
             state["railways_latency_ms"] = latency
             
-            print(f"[RAILMIND] API returned {len(results)} trains")
-            print(f"[RAILMIND] Sample: {results[0] if results else 'EMPTY - using mock'}")
-            
             if not results:
-                print("[RAILMIND] WARNING: Railways API returned no data, check RAILWAYS_API_KEY in .env")
-                await log_agent("ingest_node", "[RAILMIND] WARNING: Railways API returned no data, check RAILWAYS_API_KEY in .env")
+                await log_agent("ingest_node", "[RAILMIND] WARNING: Railways API returned no data, check RAILWAYS_API_KEY in .env. Using mock fallback.")
                 results = mock_train_data()
-                print("[RAILMIND] Using mock fallback data")
-                await log_agent("ingest_node", "[RAILMIND] Using mock fallback data")
                 
             cancelled = await get_cancelled_trains()
             live_trains = results.copy()
@@ -228,10 +208,7 @@ async def ingest_node(state: AgentState) -> dict:
                 })
         
         for train in live_trains:
-            await websocket_manager.broadcast(json.dumps({
-                "type": "TRAIN_UPDATE",
-                "data": train
-            }))
+            await websocket_manager.broadcast(json.dumps({"type": "TRAIN_UPDATE", "data": train}))
         
         await log_agent("ingest_node", f"[RAILMIND] Ingested {len(live_trains)} trains")
         return {
@@ -938,15 +915,10 @@ async def coordination_node(state: AgentState) -> dict:
 async def alert_node(state: AgentState) -> dict:
     try:
         await log_agent("alert_node", "[RAILMIND] Sending Twilio notifications...")
-        m_phone = os.getenv("MAINTENANCE_PHONE", "+1234567891")
-        o_phone = os.getenv("OPERATIONS_PHONE", "+1234567892")
-        s_phone = os.getenv("STATION_PHONE", "+1234567893")
-        p_phone = os.getenv("DEMO_PASSENGER_PHONE", "+1234567894")
-
         phone_map = {
-            "maintenance": m_phone,
-            "operations": o_phone,
-            "station_manager": s_phone
+            "maintenance": os.getenv("MAINTENANCE_PHONE", "+1234567891"),
+            "operations": os.getenv("OPERATIONS_PHONE", "+1234567892"),
+            "station_manager": os.getenv("STATION_PHONE", "+1234567893")
         }
 
         tasks = state.get("department_tasks", [])
@@ -959,21 +931,21 @@ async def alert_node(state: AgentState) -> dict:
 
             to_phone = phone_map.get(dept)
             if to_phone:
-                message_body = f"[RailMind Alert] {dept.upper()}: {desc[:120]}... Urgency: {urg}"
                 try:
-                    sid = await twilio_client.send_incident_alert(to_phone, message_body)
+                    msg = f"[RailMind Alert] {dept.upper()}: {desc[:120]}... Urgency: {urg}"
+                    sid = await twilio_client.send_incident_alert(to_phone, msg)
                     if sid:
                         sent_sms.append(sid)
                 except Exception as e:
                     logger.error(f"Error sending SMS to {dept}: {e}")
 
-        # Send passenger SMS
-        claude_json = state.get("claude_reasoning", "{}")
+        claude_response = {}
         try:
-            claude_response = json.loads(claude_json)
+            claude_response = json.loads(state.get("claude_reasoning", "{}"))
         except Exception:
-            claude_response = {}
+            pass
 
+        p_phone = os.getenv("DEMO_PASSENGER_PHONE", "+1234567894")
         pass_sms = claude_response.get("passenger_sms")
         if pass_sms and p_phone:
             try:
@@ -989,6 +961,7 @@ async def alert_node(state: AgentState) -> dict:
         logger.error(f"Error in alert_node: {e}")
         await log_agent("alert_node", f"[RAILMIND] [ERROR] Alert node failed: {e}")
     return {}
+
 
 async def save_incident_if_not_duplicate(incident):
     # Check last 5 minutes for same train number
