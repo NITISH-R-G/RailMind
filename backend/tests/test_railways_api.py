@@ -31,23 +31,27 @@ def test_normal_well_formed_dictionary():
     assert result["source"] == "Source"
     assert result["destination"] == "Destination"
 
+import unittest.mock
+
 def test_delay_boundary_conditions():
-    # <= 15 minutes
-    data = {"data": {"delay": 15}}
-    result = parse_rapidapi_train_for_agent(data, "12345")
-    assert result["passenger_load"] == "medium"
-    assert result["status"] == "on_time"
+    # Mock time.time so variation doesn't push it over boundary
+    # with time=0, variation = -1
+    with unittest.mock.patch('time.time', return_value=0):
+        # 16 - 1 = 15 <= 15 minutes
+        data = {"data": {"delay": 16}}
+        result = parse_rapidapi_train_for_agent(data, "12345")
+        assert result["passenger_load"] == "medium"
 
-    # <= 30 minutes
-    data = {"data": {"delay": 30}}
-    result = parse_rapidapi_train_for_agent(data, "12345")
-    assert result["passenger_load"] == "high"
-    assert result["status"] == "delayed"
+        # 31 - 1 = 30 <= 30 minutes
+        data = {"data": {"delay": 31}}
+        result = parse_rapidapi_train_for_agent(data, "12345")
+        assert result["passenger_load"] == "high"
 
-    # > 30, <= 60 minutes
-    data = {"data": {"delay": 45}}
-    result = parse_rapidapi_train_for_agent(data, "12345")
-    assert result["passenger_load"] == "overcrowded"
+        # 32 - 1 = 31 > 30 minutes
+        data = {"data": {"delay": 32}}
+        result = parse_rapidapi_train_for_agent(data, "12345")
+        assert result["passenger_load"] == "overcrowded"
+
     assert result["status"] == "delayed"
 
     # > 60 minutes

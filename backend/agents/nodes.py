@@ -157,6 +157,41 @@ async def evaluate_previous_action(state: AgentState) -> dict:
         "anomalies": state.get("anomalies")
     }
 
+async def _fetch_train_data(train_numbers):
+    import time
+    start_time = time.time()
+    print(f"[RAILMIND] Calling Railways API for {len(train_numbers)} trains...")
+    results = await railways_client.get_multiple_trains(train_numbers)
+
+    train_results = []
+    for tn in train_numbers:
+        r = next((x for x in results if x.get("train_number") == tn), None)
+        if not r:
+            from ..services.railways_api import get_mock_rapidapi_train, parse_rapidapi_train_for_agent
+            mock_data = get_mock_rapidapi_train(tn)
+            parsed_mock = parse_rapidapi_train_for_agent(mock_data, tn)
+            if parsed_mock:
+                train_results.append(parsed_mock)
+        else:
+            train_results.append(r)
+    return train_results, int((time.time() - start_time) * 1000)
+
+async def _get_live_trains(results):
+    cancelled = await get_cancelled_trains()
+    live_trains = results.copy()
+    for train in cancelled:
+        live_trains.append({
+            "train_number": train.get("TrainNo", "Unknown"),
+            "train_name": train.get("TrainName", "Unknown"),
+            "status": "cancelled",
+            "delay_minutes": 999,
+            "passenger_load": "overcrowded",
+            "current_station": "Unknown",
+            "lat": 20.5937,
+            "lng": 78.9629
+        })
+    return live_trains
+
 async def ingest_node(state: AgentState) -> dict:
     try:
         await log_agent("SCANNING", "Polling 15 trains on Indian Railways...")
@@ -165,27 +200,7 @@ async def ingest_node(state: AgentState) -> dict:
         else:
             train_numbers = state.get("target_trains") or ["12301", "12951", "12001", "12259", "12565", "11057", "12627", "12625", "12621", "12615", "12309", "12721", "12229", "12311", "12641", "12438", "ICE"]
             
-            import time
-            start_time = time.time()
-            
-            print(f"[RAILMIND] Calling Railways API for {len(train_numbers)} trains...")
-            results = await railways_client.get_multiple_trains(train_numbers)
-            
-            train_results = []
-            for tn in train_numbers:
-                r = next((x for x in results if x.get("train_number") == tn), None)
-                if not r:
-                    from ..services.railways_api import get_mock_rapidapi_train, parse_rapidapi_train_for_agent
-                    mock_data = get_mock_rapidapi_train(tn)
-                    parsed_mock = parse_rapidapi_train_for_agent(mock_data, tn)
-                    if parsed_mock:
-                        train_results.append(parsed_mock)
-                else:
-                    train_results.append(r)
-            
-            results = train_results
-            
-            latency = int((time.time() - start_time) * 1000)
+            results, latency = await _fetch_train_data(train_numbers)
             state["last_api_call"] = datetime.utcnow().isoformat()
             state["railways_latency_ms"] = latency
             
@@ -193,19 +208,7 @@ async def ingest_node(state: AgentState) -> dict:
                 await log_agent("ingest_node", "[RAILMIND] WARNING: Railways API returned no data, check RAILWAYS_API_KEY in .env. Using mock fallback.")
                 results = mock_train_data()
                 
-            cancelled = await get_cancelled_trains()
-            live_trains = results.copy()
-            for train in cancelled:
-                live_trains.append({
-                    "train_number": train.get("TrainNo", "Unknown"),
-                    "train_name": train.get("TrainName", "Unknown"),
-                    "status": "cancelled",
-                    "delay_minutes": 999,
-                    "passenger_load": "overcrowded",
-                    "current_station": "Unknown",
-                    "lat": 20.5937,
-                    "lng": 78.9629
-                })
+            live_trains = await _get_live_trains(results)
         
         for train in live_trains:
             await websocket_manager.broadcast(json.dumps({"type": "TRAIN_UPDATE", "data": train}))
@@ -221,6 +224,38 @@ async def ingest_node(state: AgentState) -> dict:
         await log_agent("ingest_node", f"[RAILMIND] [ERROR] Ingest node failed: {e}")
     return {}
 
+def _process_train_anomaly(train, simulated_type):
+    train_num = train.get("train_number", "Unknown")
+    train_name = train.get("train_name", "Unknown")
+    location = train.get("current_station") or train.get("source") or "Unknown"
+    delay = train.get("delay_minutes", 0)
+    load = train.get("passenger_load")
+    status = str(train.get("status") or "").lower()
+
+    anomaly = None
+    if delay > 15:
+        severity = "low" if delay <= 30 else "medium" if delay <= 60 else "high" if delay <= 120 else "critical"
+        anomaly = {"anomaly_type": simulated_type or "delay", "severity": severity}
+    elif load == "overcrowded":
+        anomaly = {"anomaly_type": simulated_type or "overcrowding", "severity": "high"}
+    elif status == "cancelled":
+        anomaly = {"anomaly_type": simulated_type or "cancellation", "severity": "critical", "status": "cancelled"}
+
+    if anomaly:
+        anomaly.update({
+            "train_number": train_num,
+            "train_name": train_name,
+            "location": location,
+            "delay_minutes": delay,
+            "passenger_load": load,
+            "current_station": train.get("current_station") or location,
+            "status": anomaly.get("status", status or "delayed"),
+            "source": train.get("source") or "Unknown",
+            "destination": train.get("destination") or "Unknown",
+            "station_code": get_station_code_from_name(train.get("current_station") or location)
+        })
+    return anomaly
+
 async def detect_node(state: AgentState) -> dict:
     try:
         await log_agent("detect_node", "[RAILMIND] Running real-time anomaly detection rules...")
@@ -228,114 +263,33 @@ async def detect_node(state: AgentState) -> dict:
         raw_data = state.get("raw_train_data", [])
         processed_trains = state.get("processed_trains", [])
         
-        # Preserve custom simulated anomaly types if present
-        simulated_types = {}
-        for a in state.get("anomalies", []):
-            if "train_number" in a and "anomaly_type" in a:
-                simulated_types[a["train_number"]] = a["anomaly_type"]
+        simulated_types = {a.get("train_number"): a.get("anomaly_type") for a in state.get("anomalies", []) if "train_number" in a and "anomaly_type" in a}
                 
         for train in raw_data:
-            train_num = train.get("train_number", "Unknown")
-            if train_num in processed_trains:
+            if train.get("train_number", "Unknown") in processed_trains:
                 continue
-            train_name = train.get("train_name", "Unknown")
-            location = train.get("current_station") or train.get("source") or "Unknown"
-            delay = train.get("delay_minutes", 0)
-            load = train.get("passenger_load")
-            status = str(train.get("status") or "").lower()
-            
-            simulated_type = simulated_types.get(train_num)
-            
-            # Rule 1: delay > 15 minutes
-            if delay > 15:
-                severity = "low"
-                if 15 < delay <= 30:
-                    severity = "low"
-                elif 30 < delay <= 60:
-                    severity = "medium"
-                elif 60 < delay <= 120:
-                    severity = "high"
-                elif delay > 120:
-                    severity = "critical"
-                    
-                anomalies.append({
-                    "train_number": train_num,
-                    "train_name": train_name,
-                    "anomaly_type": simulated_type or "delay",
-                    "severity": severity,
-                    "location": location,
-                    "delay_minutes": delay,
-                    "passenger_load": load,
-                    "current_station": train.get("current_station") or location,
-                    "status": status or "delayed",
-                    "source": train.get("source") or "Unknown",
-                    "destination": train.get("destination") or "Unknown"
-                })
-                
-            # Rule 2: overcrowding checks
-            elif load == "overcrowded":
-                anomalies.append({
-                    "train_number": train_num,
-                    "train_name": train_name,
-                    "anomaly_type": simulated_type or "overcrowding",
-                    "severity": "high",
-                    "location": location,
-                    "delay_minutes": delay,
-                    "passenger_load": load,
-                    "current_station": train.get("current_station") or location,
-                    "status": status or "delayed",
-                    "source": train.get("source") or "Unknown",
-                    "destination": train.get("destination") or "Unknown"
-                })
-                
-            # Rule 3: cancellations
-            elif status == "cancelled":
-                anomalies.append({
-                    "train_number": train_num,
-                    "train_name": train_name,
-                    "anomaly_type": simulated_type or "cancellation",
-                    "severity": "critical",
-                    "location": location,
-                    "delay_minutes": delay,
-                    "passenger_load": load,
-                    "current_station": train.get("current_station") or location,
-                    "status": "cancelled",
-                    "source": train.get("source") or "Unknown",
-                    "destination": train.get("destination") or "Unknown"
-                })
-                
-        # Map station_code if not present using get_station_code_from_name
-        for a in anomalies:
-            if "station_code" not in a:
-                loc = a.get("location") or a.get("current_station") or ""
-                a["station_code"] = get_station_code_from_name(loc)
+            anomaly = _process_train_anomaly(train, simulated_types.get(train.get("train_number")))
+            if anomaly:
+                anomalies.append(anomaly)
 
-        # Broadcast DETECTED logs for each anomaly
         for a in anomalies:
-            st_code = get_station_code_from_name(a.get("location") or a.get("current_station") or "") or a.get("location")[:4].upper()
-            delay_text = f"{a['delay_minutes']}min delay" if a.get("delay_minutes") else "anomaly"
+            st_code = a.get("station_code") or a.get("location")[:4].upper()
+            delay_text = f"{a.get('delay_minutes')}min delay" if a.get("delay_minutes") else "anomaly"
             await log_agent("DETECTED", f"Train {a['train_number']}: {delay_text} at {st_code}")
 
-        # Cascading Failure Detection (Transformation 3)
         await log_agent("CASCADE?", "Checking Delhi-Mumbai corridor...")
         cascade_info = await detect_cascade(anomalies)
         if cascade_info.get("is_cascade"):
-            corridor = cascade_info["corridor"]
-            affected_stations = cascade_info["affected_stations"]
             await log_agent("detect_node", f"[RAILMIND] [CASCADE] {cascade_info['message']}")
-            
-            # Change severity of all affected corridor trains to critical
             for a in anomalies:
-                if a.get("station_code") in affected_stations:
+                if a.get("station_code") in cascade_info["affected_stations"]:
                     a["severity"] = "critical"
                     a["anomaly_type"] = "cascade"
-            
-            # Broadcast CASCADE_ALERT via WebSocket
             try:
                 await websocket_manager.broadcast(json.dumps({
                     "type": "CASCADE_ALERT",
-                    "corridor": corridor,
-                    "affected_stations": affected_stations,
+                    "corridor": cascade_info["corridor"],
+                    "affected_stations": cascade_info["affected_stations"],
                     "message": cascade_info["message"]
                 }))
             except Exception as ws_e:
@@ -806,107 +760,53 @@ async def reroute_node(state: AgentState) -> dict:
         await log_agent("reroute_node", f"[RAILMIND] [ERROR] Reroute node failed: {e}")
     return {"detour_route": []}
 
+def _parse_tasks(claude_response, reason=""):
+    m_desc = claude_response.get("maintenance_task", "Inspect signals and tracks.")
+    o_desc = claude_response.get("operations_task", "Coordinate slot changes and schedules.")
+    s_desc = claude_response.get("station_manager_task", "Broadcast announcement on platform boards.")
+
+    if "perception" in claude_response and "decision" in claude_response:
+        actions = claude_response["decision"].get("actions", [])
+        for action in actions:
+            tool = action.get("tool")
+            msg = action.get("params", {}).get("message", action.get("reason", reason))
+            if tool == "alert_department":
+                dept = action.get("params", {}).get("dept", "").lower()
+                if "maintenance" in dept: m_desc = msg
+                elif "operations" in dept: o_desc = msg
+                elif "station" in dept or "manager" in dept: s_desc = msg
+            elif tool == "reroute_train":
+                o_desc = f"Reroute train {action.get('params', {}).get('train_no')} via {action.get('params', {}).get('via_station')}: {msg}"
+    return m_desc, o_desc, s_desc
+
 async def coordination_node(state: AgentState) -> dict:
     try:
         await log_agent("coordination_node", "[RAILMIND] Initiating department task dispatches...")
-        claude_json = state.get("claude_reasoning", "{}")
         try:
-            claude_response = json.loads(claude_json)
+            claude_response = json.loads(state.get("claude_reasoning", "{}"))
         except Exception as e:
             logger.error(f"Error parsing Claude reasoning JSON in coordination_node: {e}")
             claude_response = {}
 
-        anomalies = state.get("anomalies", [])
-        
-        # Calculate highest severity from anomalies
         severity_rank = {"low": 1, "medium": 2, "high": 3, "critical": 4}
-        highest_severity = "low"
-        highest_rank = 0
-
-        for anomaly in anomalies:
-            sev = anomaly.get("severity", "low").lower()
-            rank = severity_rank.get(sev, 1)
-            if rank > highest_rank:
-                highest_rank = rank
-                highest_severity = sev
-                if highest_rank == 4:
-                    break
-
-        has_critical = (highest_severity == "critical")
-        operations_urgency = "high" if has_critical else "medium"
-
-        # Support nested format or flat format
-        maintenance_desc = "Inspect signals and tracks."
-        operations_desc = "Coordinate slot changes and schedules."
-        station_desc = "Broadcast announcement on platform boards."
+        highest_rank = max((severity_rank.get(a.get("severity", "low").lower(), 1) for a in state.get("anomalies", [])), default=1)
         
-        if "perception" in claude_response and "decision" in claude_response:
-            actions = claude_response["decision"].get("actions", [])
-            for action in actions:
-                tool = action.get("tool")
-                reason = action.get("reason", "")
-                params = action.get("params", {})
-                if tool == "alert_department":
-                    dept = params.get("dept", "").lower()
-                    msg = params.get("message", reason)
-                    if "maintenance" in dept:
-                        maintenance_desc = msg
-                    elif "operations" in dept:
-                        operations_desc = msg
-                    elif "station" in dept or "manager" in dept:
-                        station_desc = msg
-                elif tool == "reroute_train":
-                    operations_desc = f"Reroute train {params.get('train_no')} via {params.get('via_station')}: {reason}"
-        else:
-            maintenance_desc = claude_response.get("maintenance_task", "Inspect signals and tracks.")
-            operations_desc = claude_response.get("operations_task", "Coordinate slot changes and schedules.")
-            station_desc = claude_response.get("station_manager_task", "Broadcast announcement on platform boards.")
+        m_desc, o_desc, s_desc = _parse_tasks(claude_response)
 
-        maintenance_task: DepartmentTask = {
-            "department": "maintenance",
-            "task_description": maintenance_desc,
-            "urgency": highest_severity,
-            "action_required": "Dispatch repair team immediately"
-        }
+        tasks = [
+            {"department": "maintenance", "task_description": m_desc, "urgency": "critical" if highest_rank == 4 else "high", "action_required": "Dispatch repair team immediately"},
+            {"department": "operations", "task_description": o_desc, "urgency": "high" if highest_rank == 4 else "medium", "action_required": "Execute rerouting plan"},
+            {"department": "station_manager", "task_description": s_desc, "urgency": "high", "action_required": "Make passenger announcement + update platform boards"}
+        ]
 
-        operations_task: DepartmentTask = {
-            "department": "operations",
-            "task_description": operations_desc,
-            "urgency": operations_urgency,
-            "action_required": "Execute rerouting plan"
-        }
-
-        station_manager_task: DepartmentTask = {
-            "department": "station_manager",
-            "task_description": station_desc,
-            "urgency": "high",
-            "action_required": "Make passenger announcement + update platform boards"
-        }
-
-        department_tasks = [maintenance_task, operations_task, station_manager_task]
-        state["department_tasks"] = department_tasks
-
-        # Save to MongoDB
         incident_uuid = str(uuid4())
-        mongo_tasks = []
-        for task in department_tasks:
-            mongo_tasks.append({
-                "incident_id": incident_uuid,
-                "department": task["department"],
-                "task_description": task["task_description"],
-                "urgency": task["urgency"],
-                "action_required": task["action_required"],
-                "status": "pending",
-                "timestamp": datetime.utcnow()
-            })
-
         try:
-            await db_client.insert_department_tasks(mongo_tasks)
+            await db_client.insert_department_tasks([{**t, "incident_id": incident_uuid, "status": "pending", "timestamp": datetime.utcnow()} for t in tasks])
         except Exception as e:
             logger.warning(f"Failed to save department tasks to MongoDB: {e}")
 
         await log_agent("coordination_node", "[RAILMIND] Dispatched tasks to 3 departments simultaneously")
-        return {"department_tasks": department_tasks}
+        return {"department_tasks": tasks}
     except Exception as e:
         logger.error(f"Error in coordination_node: {e}")
         await log_agent("coordination_node", f"[RAILMIND] [ERROR] Coordination node failed: {e}")
@@ -975,119 +875,73 @@ async def save_incident_if_not_duplicate(incident):
     print(f"[RAILMIND] New incident saved: {incident['incident_title']}")
     return True
 
+def _parse_report(claude_response):
+    confidence_score = None
+    reasoning_steps = []
+
+    m_desc, o_desc, s_desc = _parse_tasks(claude_response)
+    passenger_sms = claude_response.get("passenger_sms") or "Check platform screens for status updates."
+    situation_summary = claude_response.get("situation_summary", "")
+
+    if "perception" in claude_response and "decision" in claude_response:
+        perception, decision = claude_response["perception"], claude_response["decision"]
+        situation_summary = perception.get("situation", "")
+        confidence_score = int(decision.get("confidence", 0) * 100) if decision.get("confidence") is not None else None
+
+        for action in decision.get("actions", []):
+            if action.get("tool") == "send_passenger_alert":
+                passenger_sms = action.get("params", {}).get("message", action.get("reason", ""))
+
+        reasoning_steps = [
+            f"PERCEIVE: {perception.get('situation')}",
+            f"ASSESS: Corridor = {perception.get('affected_corridor')}, Cascade risk = {perception.get('is_cascade')}",
+            f"DECIDE: {decision.get('decision')}",
+            f"ACTION SLOTS: Dispatched {len(decision.get('actions', []))} tasks to departments"
+        ]
+    else:
+        confidence_score = claude_response.get("confidence_score")
+        reasoning_steps = claude_response.get("reasoning_steps") or []
+
+    return m_desc, o_desc, s_desc, passenger_sms, situation_summary, confidence_score, reasoning_steps
+
 async def report_node(state: AgentState) -> dict:
     try:
         await log_agent("report_node", "[RAILMIND] Broadcasting operations report...")
-        
         anomalies = state.get("anomalies", [])
         if not anomalies:
             return {}
             
         anomaly = anomalies[0]
-        train_number = anomaly.get("train_number", "Unknown")
-        train_name = anomaly.get("train_name", "Unknown")
-        current_station = anomaly.get("current_station") or anomaly.get("location") or "Unknown"
-        delay_minutes = anomaly.get("delay_minutes", 0)
-        severity = anomaly.get("severity", "medium")
-
-        claude_json = state.get("claude_reasoning", "{}")
         try:
-            claude_response = json.loads(claude_json)
+            claude_response = json.loads(state.get("claude_reasoning", "{}"))
         except Exception:
             claude_response = {}
 
-        # Handle nested perception/decision format
-        confidence_score = None
-        reasoning_steps = []
-        situation_summary = ""
-        
-        # Default fallback values for tasks
-        maintenance_task = "Inspect signaling hardware."
-        operations_task = "Execute scheduling adjustments."
-        station_manager_task = "Broadcast delay announcements."
-        passenger_sms = "Check platform screens for status updates."
-
-        if "perception" in claude_response and "decision" in claude_response:
-            perception = claude_response["perception"]
-            decision = claude_response["decision"]
-            situation_summary = perception.get("situation", "")
-            confidence_score = int(decision.get("confidence", 0) * 100) if decision.get("confidence") is not None else None
+        m_desc, o_desc, s_desc, passenger_sms, situation_summary, confidence_score, reasoning_steps = _parse_report(claude_response)
+        if not situation_summary:
+            situation_summary = f"Train {anomaly.get('train_number')} {anomaly.get('train_name')} is running {anomaly.get('delay_minutes', 0)} minutes behind schedule at {anomaly.get('current_station')}."
             
-            # Map actions to task text
-            actions = decision.get("actions", [])
-            for action in actions:
-                tool = action.get("tool")
-                reason = action.get("reason", "")
-                params = action.get("params", {})
-                if tool == "alert_department":
-                    dept = params.get("dept", "").lower()
-                    msg = params.get("message", reason)
-                    if "maintenance" in dept:
-                        maintenance_task = msg
-                    elif "operations" in dept:
-                        operations_task = msg
-                    elif "station" in dept or "manager" in dept:
-                        station_manager_task = msg
-                elif tool == "send_passenger_alert":
-                    passenger_sms = params.get("message", reason)
-                elif tool == "reroute_train":
-                    operations_task = f"Reroute train {params.get('train_no')} via {params.get('via_station')}: {reason}"
-
-            # Create reasoning steps for frontend rendering
-            reasoning_steps = [
-                f"PERCEIVE: {perception.get('situation')}",
-                f"ASSESS: Corridor = {perception.get('affected_corridor')}, Cascade risk = {perception.get('is_cascade')}",
-                f"DECIDE: {decision.get('decision')}",
-                f"ACTION SLOTS: Dispatched {len(actions)} tasks to departments"
-            ]
-        else:
-            situation_summary = claude_response.get("situation_summary") or f"Train {train_number} {train_name} is running {delay_minutes} minutes behind schedule at {current_station}."
-            maintenance_task = claude_response.get("maintenance_task") or "Inspect signaling hardware."
-            operations_task = claude_response.get("operations_task") or "Execute scheduling adjustments."
-            station_manager_task = claude_response.get("station_manager_task") or "Broadcast delay announcements."
-            passenger_sms = claude_response.get("passenger_sms") or "Check platform screens for status updates."
-            confidence_score = claude_response.get("confidence_score")
-            reasoning_steps = claude_response.get("reasoning_steps") or []
-
-        # Check for corridor cascade disruption
-        cascade_title = None
         cascade_info = await detect_cascade(anomalies)
-        if cascade_info.get("is_cascade"):
-            cascade_title = f"NETWORK EVENT: {cascade_info['corridor']} Corridor Disruption"
+        cascade_title = f"NETWORK EVENT: {cascade_info['corridor']} Corridor Disruption" if cascade_info.get("is_cascade") else None
             
-        incident_id = str(uuid4())
-
-        # Construct prediction warning message
         pred = state.get("prediction", {})
-        worst_case = pred.get("worst_case")
-        if not worst_case:
-            at_risk_count = len(pred.get("at_risk_trains", [])) or 3
-            future_time = "14:30"
-            try:
-                ts_str = state.get("last_api_call") or datetime.utcnow().isoformat()
-                from datetime import timedelta
-                dt = datetime.fromisoformat(str(ts_str))
-                future_dt = dt + timedelta(minutes=30)
-                future_time = future_dt.strftime("%H:%M")
-            except Exception:
-                pass
-            worst_case = f"If unresolved: {at_risk_count} more trains will be delayed by {future_time}"
+        worst_case = pred.get("worst_case") or f"If unresolved: {len(pred.get('at_risk_trains', [])) or 3} more trains will be delayed by 14:30"
         
         incident_report = {
-            "incident_id": incident_id,
+            "incident_id": str(uuid4()),
             "loop_created": state.get("loop_count", 0),
             "timestamp": datetime.utcnow().isoformat(),
-            "train_number": train_number,
-            "train_name": train_name,
-            "incident_title": cascade_title or f"{train_number} {train_name} delayed {delay_minutes}min at {current_station}",
-            "current_station": current_station,
-            "delay_minutes": delay_minutes,
-            "severity": severity,
+            "train_number": anomaly.get("train_number", "Unknown"),
+            "train_name": anomaly.get("train_name", "Unknown"),
+            "incident_title": cascade_title or f"{anomaly.get('train_number')} {anomaly.get('train_name')} delayed {anomaly.get('delay_minutes')}min at {anomaly.get('current_station')}",
+            "current_station": anomaly.get("current_station") or anomaly.get("location") or "Unknown",
+            "delay_minutes": anomaly.get("delay_minutes", 0),
+            "severity": anomaly.get("severity", "medium"),
             "situation_summary": situation_summary,
             "reroute_plan": state.get("reroute_plan") or "Redirect affected trains via alternate route.",
-            "maintenance_task": maintenance_task,
-            "operations_task": operations_task,
-            "station_manager_task": station_manager_task,
+            "maintenance_task": m_desc,
+            "operations_task": o_desc,
+            "station_manager_task": s_desc,
             "passenger_sms": passenger_sms,
             "resolution_status": "pending",
             "departments_notified": ["maintenance", "operations", "station_manager"],
@@ -1099,46 +953,29 @@ async def report_node(state: AgentState) -> dict:
             "prediction": worst_case,
             "memory_used": state.get("memory_used")
         }
-        # Check for duplicates in last 5 minutes before saving (ISSUE 2)
-        saved = await save_incident_if_not_duplicate(incident_report)
-        if saved:
-            # Broadcast via WebSocket
+        if await save_incident_if_not_duplicate(incident_report):
             try:
-                await websocket_manager.broadcast(json.dumps({
-                    "type": "INCIDENT_UPDATE",
-                    "data": incident_report
-                }))
+                await websocket_manager.broadcast(json.dumps({"type": "INCIDENT_UPDATE", "data": incident_report}))
             except Exception as e:
                 logger.error(f"Failed to broadcast incident update: {e}")
-
-            await log_agent("LOGGED", f"Incident #RM-{incident_id[:3].upper()} saved to database")
+            await log_agent("LOGGED", f"Incident #RM-{incident_report['incident_id'][:3].upper()} saved to database")
         else:
-            await log_agent("report_node", f"[RAILMIND] Duplicate incident check: train {train_number} has an active report in the last 5 minutes. Skipping DB insertion and broadcast.")
+            await log_agent("report_node", f"[RAILMIND] Duplicate incident check: train {anomaly.get('train_number')} has an active report in the last 5 minutes. Skipping DB insertion and broadcast.")
 
-        # Mark this train as recently processed in state
         processed_trains = state.get("processed_trains", [])
-        processed_trains.append(anomaly["train_number"])
-
-        # Reset state fields
-        state["loop_count"] = state.get("loop_count", 0) + 1
-        state["next_node"] = "END"
+        processed_trains.append(anomaly.get("train_number"))
 
         passengers = state.get("decision", {}).get("passenger_impact", "847 passengers affected")
-        if isinstance(passengers, str):
-            passengers_str = passengers
-        else:
-            passengers_str = f"{passengers} passengers affected"
-        await log_agent("COMPLETE", f"Loop {state.get('loop_count', 0)} done. {passengers_str}. Next scan: 30 seconds.")
+        await log_agent("COMPLETE", f"Loop {state.get('loop_count', 0) + 1} done. {passengers}. Next scan: 30 seconds.")
 
         return {
             "processed_trains": processed_trains,
-            "loop_count": state.get("loop_count", 0),
-            "anomalies": ["CLEAR"], # clear anomalies so next run starts fresh
+            "loop_count": state.get("loop_count", 0) + 1,
+            "anomalies": ["CLEAR"],
             "sms_alerts_sent": ["CLEAR"],
             "department_tasks": ["CLEAR"],
             "claude_reasoning": "{}"
         }
-
     except Exception as e:
         logger.error(f"Error in report_node: {e}")
         await log_agent("report_node", f"[RAILMIND] [ERROR] Report node failed: {e}")
