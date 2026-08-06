@@ -807,100 +807,11 @@ async def reason_node(state: AgentState) -> AgentState:
         import time
         start_time = time.time()
         
-        # STEP 1: PERCEIVE - What is happening?
-        perception_prompt = f"""
-        You are RailMind, India's autonomous railway brain.
+        errors = state.get("errors", [])
         
-        Current network status:
-        {json.dumps(state.get("raw_train_data", []), indent=2)}
+        plan = await reason_with_ai(anomalies, errors=errors)
         
-        Detected anomalies:
-        {json.dumps(state.get("anomalies", []), indent=2)}
-        
-        Historical context (last 5 incidents):
-        {json.dumps(state.get("incident_history", []), indent=2)}
-
-        Historical memory for this train at this station:
-        {json.dumps(memories, indent=2)}
-        Use past successful strategies if available.
-        
-        STEP 1 - PERCEIVE: Analyze the full situation.
-        What is ACTUALLY happening on the network right now?
-        Are these anomalies connected? Is there a cascade 
-        failure developing? Pattern analysis only.
-        Respond in JSON: {{"situation": "...", 
-        "is_cascade": true/false, 
-        "affected_corridor": "...",
-        "severity_assessment": "..."}}
-        """
-        await log_agent("THINKING", "Sending to Gemini for perception...")
-        perception = await call_gemini(perception_prompt, state)
-        
-        situation = perception.get('situation', 'Network stress on 2 corridors. Not cascade yet. Individual responses needed.')
-        await log_agent("PERCEIVED", situation)
-        
-        # STEP 2: DECIDE - What should be done?
-        decision_prompt = f"""
-        Situation assessment: {perception}
-
-        Historical memory for this train at this station:
-        {json.dumps(memories, indent=2)}
-        Use past successful strategies if available.
-        
-        STEP 2 - DECIDE: Make autonomous operational decisions.
-        
-        Consider:
-        - Which trains need immediate rerouting?
-        - Which stations need to be alerted?
-        - Is this a single incident or network-wide issue?
-        - What is the priority order of actions?
-        - What is the estimated passenger impact?
-        
-        You have these tools available:
-        - reroute_train(train_no, via_station)
-        - alert_department(dept, message, urgency)
-        - hold_train(train_no, station, duration_mins)
-        - send_passenger_alert(train_no, message)
-        - escalate_to_control_room(incident_summary)
-        
-        Decide which tools to use and in what order.
-        Respond in JSON: {{
-            "decision": "...",
-            "actions": [
-                {{"tool": "reroute_train", 
-                  "params": {{}}, 
-                  "reason": "..."}},
-            ],
-            "passenger_impact": "X passengers affected",
-            "estimated_recovery_time": "X minutes",
-            "confidence": 0.0-1.0
-        }}
-        """
-        await log_agent("DECIDING", "Evaluating 4 possible actions...")
-        decision = await call_gemini(decision_prompt, state)
-        
-        confidence = int(decision.get('confidence', 0.94) * 100)
-        decided_msg = decision.get('decision', 'Rerouting 12301 via Allahabad. Holding 12625 at Nagpur 8 mins.')
-        await log_agent("DECIDED", f"Confidence: {confidence}%. {decided_msg}")
-        
-        # STEP 3: ACT - Execute decisions
-        actions_count = len(decision.get('actions', [])) or 3
-        await log_agent("ACTING", f"Dispatching to {actions_count} departments...")
-        
-        for action in decision.get("actions", []):
-            await execute_tool(action.get("tool"), 
-                              action.get("params", {}), 
-                              action.get("reason", ""),
-                              state)
-        
-        state["perception"] = perception
-        state["decision"] = decision
-        state["claude_reasoning"] = json.dumps({
-            "perception": perception,
-            "decision": decision,
-            "situation_summary": perception.get("situation", ""),
-            "reroute_plan": state.get("reroute_plan") or ""
-        })
+        state["claude_reasoning"] = json.dumps(plan)
         
         latency = int((time.time() - start_time) * 1000)
         state["ai_latency_ms"] = latency
@@ -1308,26 +1219,40 @@ async def supervisor_node(state: AgentState) -> dict:
         if last_node == "supervisor_node" and (not anomalies or state.get("should_continue") is False):
             return {"next_node": "END", "last_node_executed": "supervisor_node"}
 
-        # If we just came from ingest, we must go to detect.
-        if not last_node or last_node == "ingest_node" or last_node == "supervisor_node" and not anomalies:
+        # Evaluate states dynamically
+
+        # 1. Detect Phase
+        # If no anomalies detected yet, but we have raw_train_data
+        if not anomalies and state.get("raw_train_data"):
              return {"next_node": "detect_node", "last_node_executed": "supervisor_node"}
 
-        # If reasoning hasn't happened or failed to produce plan
-        if not state.get("claude_reasoning") or state.get("claude_reasoning") == "{}":
-            if getattr(state, "get", lambda k,d: d)("ai_latency_ms", -1) > 0:
+        if not anomalies:
+             return {"next_node": "END", "last_node_executed": "supervisor_node"}
+
+        # 2. Predict Phase
+        if anomalies and not state.get("prediction"):
+             return {"next_node": "predict_node", "last_node_executed": "supervisor_node"}
+
+        # 3. Reason Phase
+        if anomalies and (not state.get("claude_reasoning") or state.get("claude_reasoning") == "{}"):
+            if getattr(state, "get", lambda k,d: d)("ai_latency_ms", -1) > 0 and last_node == "reason_node":
                  # AI ran but returned nothing. Stop ping-ponging.
                  return {"next_node": "END", "last_node_executed": "supervisor_node"}
             return {"next_node": "reason_node", "last_node_executed": "supervisor_node"}
 
-        # Self correction loop check
+        # 4. Self Correction
         try:
             reasoning = json.loads(state.get("claude_reasoning", "{}"))
             maintenance = reasoning.get("maintenance_task", "")
-            if "Kanpur" in maintenance and "restricted" in maintenance.lower():
-                 # Mock conflict logic
-                 await log_agent("supervisor_node", "[RAILMIND] [WARNING] Conflict detected in maintenance task. Re-routing to Reasoner.")
+
+            anomaly = anomalies[0]
+            current_station = anomaly.get("current_station") or anomaly.get("location") or "Unknown"
+
+            # Grounded dynamic conflict check
+            if current_station in maintenance and ("restricted" in maintenance.lower() or "conflict" in maintenance.lower()):
+                 await log_agent("supervisor_node", f"[RAILMIND] [WARNING] Conflict detected in maintenance task for {current_station}. Re-routing to Reasoner.")
                  return {
-                     "errors": ["Maintenance task conflicts with active line configurations at Kanpur."],
+                     "errors": [f"Maintenance task conflicts with active line configurations at {current_station}."],
                      "claude_reasoning": "{}", # clear to force re-reason
                      "next_node": "reason_node",
                      "last_node_executed": "supervisor_node"
@@ -1338,18 +1263,19 @@ async def supervisor_node(state: AgentState) -> dict:
             logger.exception("Unexpected error in supervisor self-correction logic")
             raise
 
+        # 5. Route Phase
         if not state.get("reroute_plan"):
              return {"next_node": "reroute_node", "last_node_executed": "supervisor_node"}
 
-        # If tasks not generated
+        # 6. Coordinate Phase
         if not state.get("department_tasks"):
             return {"next_node": "coordination_node", "last_node_executed": "supervisor_node"}
 
-        # If alerts not sent
+        # 7. Alert Phase
         if not state.get("sms_alerts_sent") and len(state.get("department_tasks", [])) > 0:
             return {"next_node": "alert_node", "last_node_executed": "supervisor_node"}
 
-        # Otherwise report and finish
+        # 8. Report Phase
         return {"next_node": "report_node", "last_node_executed": "supervisor_node"}
 
     except Exception as e:

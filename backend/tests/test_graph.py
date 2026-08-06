@@ -88,6 +88,7 @@ async def test_supervisor_self_correction():
         "errors": [],
         "next_node": "",
         "last_node_executed": "reason_node",
+        "prediction": {"fake": "predict"},
         "messages": [],
         "tools_used": []
     }

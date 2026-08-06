@@ -33,7 +33,7 @@ class AgentState(TypedDict):
     anomalies: Annotated[List[TrainAnomaly], append_to_list]
     claude_reasoning: str
     reroute_plan: Optional[str]
-    department_tasks: Annotated[List[DepartmentTask], operator.add]
+    department_tasks: Annotated[List[dict], operator.add]
     sms_alerts_sent: Annotated[List[str], append_to_list]
     incident_report: Optional[str]
     loop_count: int
@@ -47,6 +47,7 @@ class AgentState(TypedDict):
     next_node: str
     last_node_executed: str
     messages: Annotated[list, operator.add]
+    agent_logs: Annotated[List[dict], operator.add]
     tools_used: Annotated[List[str], append_to_list]
     detour_route: List[str]
     perception: Optional[dict]
