@@ -922,6 +922,25 @@
       "action_required": "Make passenger announcement + update platform boards",
       "status": "pending",
       "timestamp": "2026-06-14 13:04:01.066977"
+    },
+    {
+      "incident_id": "67ef7829-40c2-4e62-9e69-e4877a2972da",
+      "department": "maintenance",
+      "task_description": "Platform inspection CNB",
+      "urgency": "critical",
+      "action_required": "Emergency dispatch action",
+      "status": "pending",
+      "timestamp": "2026-08-06 03:48:11.883023"
+    },
+    {
+      "incident_id": "3bebde54-10a1-4594-9e04-d4d4bf453659",
+      "department": "maintenance",
+      "task_description": "Platform inspection CNB",
+      "urgency": "critical",
+      "action_required": "Emergency dispatch action",
+      "status": "pending",
+      "timestamp": "2026-08-06 03:51:58.314668"
     }
-  ]
+  ],
+  "agent_memory": []
 }
