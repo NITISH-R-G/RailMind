@@ -1,10 +1,14 @@
 /* eslint-disable */
 import React from 'react';
 import { MoreHorizontal, CheckCircle2, AlertTriangle } from 'lucide-react';
+import { useStore } from '../store';
 
-export default function TaskBoard({ tasks = [], onResolve, fullScreen = false }) {
-  // Setup default mock tasks if tasks list is empty
-  const activeTasks = tasks.length > 0 ? tasks : [
+export default function TaskBoard({ tasks = [], onResolve, fullScreen = false, compact = false }) {
+  // Use store if props are not explicitly provided
+  const storeTasks = useStore(state => state.tasks);
+  const storeResolve = useStore(state => state.handleResolve);
+
+  const activeTasks = (tasks && tasks.length > 0) ? tasks : (storeTasks.length > 0 ? storeTasks : [
     {
       id: "task_001",
       department: "maintenance",
@@ -29,9 +33,10 @@ export default function TaskBoard({ tasks = [], onResolve, fullScreen = false })
       action_required: "COMPLETED 10:55",
       detail: "Passenger crowd dissipated, platform cleared for next service."
     }
-  ];
+  ]);
 
-  // Group tasks by department
+  const resolveHandler = onResolve || storeResolve;
+
   const maintenanceTasks = activeTasks.filter(t => t.department?.toLowerCase() === 'maintenance');
   const operationsTasks = activeTasks.filter(t => t.department?.toLowerCase() === 'operations');
   const stationTasks = activeTasks.filter(t =>
@@ -40,262 +45,142 @@ export default function TaskBoard({ tasks = [], onResolve, fullScreen = false })
   );
 
   const getUrgencyBadge = (urgency) => {
-    let color = '#ff3366'; // Red
-    let bg = 'rgba(255, 51, 102, 0.08)';
-    let text = 'Urgent';
+    let color = '#FF3333'; // Urgent/Critical
+    let bg = 'rgba(255, 51, 51, 0.08)';
+    let text = 'URGENT';
 
-    if (urgency.toLowerCase() === 'medium') {
-      color = '#ffb300'; // Yellow
-      bg = 'rgba(255, 179, 0, 0.08)';
-      text = 'Medium';
-    } else if (urgency.toLowerCase() === 'resolved') {
-      color = '#00e676'; // Green
-      bg = 'rgba(0, 230, 118, 0.08)';
-      text = 'Resolved';
-    } else if (urgency.toLowerCase() === 'low') {
-      color = '#00f0ff'; // Blue
-      bg = 'rgba(0, 240, 255, 0.08)';
-      text = 'Low';
-    } else if (urgency.toLowerCase() === 'high') {
-      color = '#ffb300'; // Orange
-      bg = 'rgba(255, 179, 0, 0.08)';
-      text = 'High';
-    } else if (urgency.toLowerCase() === 'critical') {
-      color = '#ff3366'; // Dark Red
-      bg = 'rgba(255, 51, 102, 0.08)';
-      text = 'Critical';
+    if (urgency?.toLowerCase() === 'medium') {
+      color = '#FFB000'; // Amber
+      bg = 'rgba(255, 176, 0, 0.08)';
+      text = 'MEDIUM';
+    } else if (urgency?.toLowerCase() === 'resolved') {
+      color = '#00FF66'; // Green
+      bg = 'rgba(0, 255, 102, 0.08)';
+      text = 'RESOLVED';
     }
 
     return (
       <span className="palantir-mono" style={{
+        backgroundColor: bg,
+        color: color,
+        border: `1px solid ${color}`,
+        padding: '2px 6px',
         fontSize: '9px',
         fontWeight: 700,
-        color: color,
-        backgroundColor: bg,
-        padding: '2px 6px',
-        border: `1px solid ${color}`,
-        borderRadius: '2px',
-        letterSpacing: '1px'
+        textTransform: 'uppercase',
+        letterSpacing: '0.5px',
+        whiteSpace: 'nowrap'
       }}>
         {text}
       </span>
     );
   };
 
-  const renderColumn = (title, columnTasks) => {
-    return (
-      <div style={{
-        flex: 1,
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '12px',
-        padding: '16px',
-        borderRight: '1px solid #1a2433'
-      }}>
-        <h3 className="palantir-mono" style={{
-          fontSize: '10px',
-          fontWeight: 600,
-          color: '#5c7080',
-          letterSpacing: '1px',
-          textTransform: 'uppercase'
-        }}>
-          {title}
-        </h3>
-        
-        <div style={{
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '8px',
-          overflowY: 'auto'
-        }}>
-          {columnTasks.map((task) => {
-            const isResolved = task.status?.toLowerCase() === 'resolved' || task.urgency?.toLowerCase() === 'resolved';
+  const Column = ({ title, colTasks, count }) => (
+    <div style={{
+      display: 'flex',
+      flexDirection: 'column',
+      gap: compact ? '8px' : '12px',
+      backgroundColor: compact ? 'transparent' : '#0A0E17',
+      border: compact ? 'none' : '1px solid #26354A',
+      padding: compact ? '0' : '16px',
+      minHeight: fullScreen ? '100%' : (compact ? 'auto' : '300px')
+    }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #26354A', paddingBottom: '8px' }}>
+        <h3 className="palantir-mono" style={{ fontSize: '11px', fontWeight: 600, color: '#e2e8f0' }}>{title}</h3>
+        <span className="palantir-mono" style={{ backgroundColor: '#161F30', padding: '2px 8px', fontSize: '9px', color: '#8a9ba8', border: '1px solid #26354A' }}>
+          {count}
+        </span>
+      </div>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', overflowY: 'auto', flex: 1 }}>
+        {colTasks.length === 0 ? (
+           <div className="palantir-mono" style={{ color: '#5c7080', fontSize: '9px', textAlign: 'center', marginTop: '12px' }}>[ NO ACTIVE TASKS ]</div>
+        ) : (
+          colTasks.map(task => {
+            const taskId = task.id || task._id;
+            const isResolved = task.urgency === 'resolved' || task.status === 'resolved';
 
             return (
-              <div
-                key={task.id || task._id}
-                style={{
-                  backgroundColor: '#121820',
-                  border: '1px solid #1a2433',
-                  borderRadius: '2px',
-                  padding: '16px',
-                  position: 'relative',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '8px',
-                  transition: 'all 0.2s'
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.backgroundColor = '#17202b';
-                  e.currentTarget.style.borderColor = '#00f0ff';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = '#121820';
-                  e.currentTarget.style.borderColor = '#1a2433';
-                }}
-              >
-                {/* Badge & dots */}
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div key={taskId} style={{
+                backgroundColor: '#161F30',
+                border: '1px solid #26354A',
+                padding: '12px',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '8px'
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                  <span className="palantir-mono" style={{ fontSize: '9px', color: '#8a9ba8', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{task.action_required}</span>
                   {getUrgencyBadge(task.urgency)}
-                  {isResolved ? (
-                    <CheckCircle2 size={16} style={{ color: '#00e676' }} />
-                  ) : (
-                    <button 
-                      onClick={() => onResolve && onResolve(task._id || task.id)}
-                      title="Mark task as resolved"
-                      style={{
-                        backgroundColor: 'transparent',
-                        border: 'none',
-                        color: '#5c7080',
-                        cursor: 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        transition: 'color 0.2s'
-                      }}
-                      onMouseEnter={(e) => e.currentTarget.style.color = '#00e676'}
-                      onMouseLeave={(e) => e.currentTarget.style.color = '#5c7080'}
-                    >
-                      <span style={{ fontSize: '12px', fontWeight: 'bold' }}>•••</span>
-                    </button>
-                  )}
                 </div>
 
-                {/* Description */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  {!isResolved && task.urgency?.toLowerCase() === 'urgent' && (
-                    <AlertTriangle size={16} style={{ color: '#ff3366', flexShrink: 0 }} />
-                  )}
-                  <span className="palantir-mono" style={{
-                    fontSize: '12px',
-                    fontWeight: 600,
-                    color: isResolved ? '#5c7080' : '#fff',
-                    textDecoration: isResolved ? 'line-through' : 'none'
-                  }}>
-                    {task.task_description || task.description}
-                  </span>
+                <div>
+                  <h4 className="palantir-mono" style={{ fontSize: '11px', fontWeight: 600, color: '#e2e8f0', marginBottom: '2px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{task.task_description}</h4>
+                  {!compact && <p className="palantir-mono" style={{ fontSize: '10px', color: '#5c7080', lineHeight: '1.4' }}>{task.detail}</p>}
                 </div>
 
-                {/* Details */}
-                <span className="palantir-mono" style={{ fontSize: '10px', color: '#5c7080', fontWeight: 500 }}>
-                  {task.action_required}
-                </span>
-
-                {/* Short Task description */}
-                <span style={{ fontSize: '11px', color: '#8a9ba8', lineHeight: '1.4' }}>
-                  {task.detail || task.situation_summary || "Anomaly logged. Awaiting dispatch actions."}
-                </span>
-
-                {/* Action Buttons */}
-                {!isResolved ? (
-                  <div style={{ display: 'flex', gap: '8px', marginTop: '4px' }}>
-                    <button 
-                      onClick={() => onResolve && onResolve(task._id || task.id)}
-                      className="palantir-mono"
-                      style={{
-                        flex: 1,
-                        backgroundColor: '#1c2430',
-                        border: '1px solid #1a2433',
-                        color: '#e2e8f0',
-                        fontSize: '10px',
-                        padding: '6px 0',
-                        cursor: 'pointer',
-                        borderRadius: '2px',
-                        fontWeight: 600
-                      }}
-                    >
-                      Action
-                    </button>
-                    <button 
-                      className="palantir-mono"
-                      style={{
-                        flex: 1,
-                        backgroundColor: '#1c2430',
-                        border: '1px solid #1a2433',
-                        color: '#e2e8f0',
-                        fontSize: '10px',
-                        padding: '6px 0',
-                        cursor: 'pointer',
-                        borderRadius: '2px',
-                        fontWeight: 600
-                      }}
-                    >
-                      Assign
-                    </button>
-                  </div>
-                ) : (
-                  <div style={{ display: 'flex', gap: '8px', marginTop: '4px' }}>
-                    <button 
-                      disabled
-                      className="palantir-mono"
-                      style={{
-                        flex: 1,
-                        backgroundColor: 'rgba(0, 230, 118, 0.04)',
-                        border: '1px solid rgba(0, 230, 118, 0.15)',
-                        color: '#00e676',
-                        fontSize: '10px',
-                        padding: '6px 0',
-                        borderRadius: '2px',
-                        fontWeight: 600,
-                        textAlign: 'center'
-                      }}
-                    >
-                      Resolved ✓
-                    </button>
-                  </div>
+                {!isResolved && (
+                  <button
+                    onClick={() => resolveHandler && resolveHandler(taskId)}
+                    className="palantir-mono"
+                    style={{
+                      marginTop: '4px',
+                      backgroundColor: 'transparent',
+                      border: '1px solid #00FF66',
+                      color: '#00FF66',
+                      padding: '4px',
+                      fontSize: '9px',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '6px',
+                      transition: 'all 0.2s'
+                    }}
+                    onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'rgba(0, 255, 102, 0.1)'; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
+                  >
+                    <CheckCircle2 size={10} /> RESOLVE
+                  </button>
                 )}
               </div>
             );
-          })}
-        </div>
+          })
+        )}
       </div>
-    );
-  };
+    </div>
+  );
 
   return (
-    <div style={{
-      height: fullScreen ? '100%' : '250px',
-      flex: fullScreen ? 1 : 'none',
-      backgroundColor: '#0d1117',
-      borderTop: '1px solid #1a2433',
-      display: 'flex',
-      flexDirection: 'column',
-      flexShrink: fullScreen ? 1 : 0
-    }}>
-      {/* Legend & Header */}
-      <div style={{
-        padding: '12px 24px',
-        borderBottom: '1px solid #1a2433',
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center'
-      }}>
-        <h2 className="palantir-mono" style={{ fontSize: '11px', fontWeight: 600, color: '#e2e8f0', letterSpacing: '1px' }}>
-          Tasks
-        </h2>
-        
-        {/* Legend */}
-        <div style={{ display: 'flex', gap: '16px', alignItems: 'center' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <span style={{ width: '6px', height: '6px', backgroundColor: '#ff3366' }}></span>
-            <span className="palantir-mono" style={{ fontSize: '9px', color: '#5c7080', fontWeight: 600 }}>[ Urgent ]</span>
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <span style={{ width: '6px', height: '6px', backgroundColor: '#ffb300' }}></span>
-            <span className="palantir-mono" style={{ fontSize: '9px', color: '#5c7080', fontWeight: 600 }}>[ Medium ]</span>
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <span style={{ width: '6px', height: '6px', backgroundColor: '#00e676' }}></span>
-            <span className="palantir-mono" style={{ fontSize: '9px', color: '#5c7080', fontWeight: 600 }}>[ Resolved ]</span>
-          </div>
+    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', gap: compact ? '16px' : '16px', overflow: 'hidden' }}>
+      {fullScreen && (
+         <div>
+          <h2 className="palantir-mono" style={{ fontSize: '18px', fontWeight: 600, color: '#e2e8f0' }}>MULTI-DEPARTMENT TASK SYNCHRONIZATION</h2>
+          <p className="palantir-mono" style={{ fontSize: '11px', color: '#5c7080' }}>ACTIVE COGNITIVE AGENT DISPATCHES</p>
         </div>
-      </div>
+      )}
 
-      {/* Grid columns */}
-      <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
-        {renderColumn('Maintenance', maintenanceTasks)}
-        {renderColumn('Operations', operationsTasks)}
-        {renderColumn('Station Manager', stationTasks)}
-      </div>
+      {compact ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', flex: 1, overflowY: 'auto', paddingRight: '8px' }}>
+          <Column title="MAINTENANCE" colTasks={maintenanceTasks} count={maintenanceTasks.length} />
+          <Column title="OPERATIONS" colTasks={operationsTasks} count={operationsTasks.length} />
+          <Column title="STATION CTRL" colTasks={stationTasks} count={stationTasks.length} />
+        </div>
+      ) : (
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(3, 1fr)',
+          gap: '16px',
+          flex: 1,
+          overflow: 'hidden'
+        }}>
+          <Column title="MAINTENANCE NODE" colTasks={maintenanceTasks} count={maintenanceTasks.length} />
+          <Column title="OPERATIONS NODE" colTasks={operationsTasks} count={operationsTasks.length} />
+          <Column title="STATION CONTROL" colTasks={stationTasks} count={stationTasks.length} />
+        </div>
+      )}
     </div>
   );
 }

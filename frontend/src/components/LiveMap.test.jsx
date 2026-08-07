@@ -1,6 +1,7 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import LiveMap from './LiveMap';
+import { useStore } from '../store';
 
 // Mock react-leaflet
 vi.mock('react-leaflet', () => {
@@ -9,48 +10,79 @@ vi.mock('react-leaflet', () => {
     TileLayer: () => <div data-testid="tile-layer" />,
     Marker: ({ children }) => <div data-testid="marker">{children}</div>,
     Popup: ({ children }) => <div data-testid="popup">{children}</div>,
-    ZoomControl: () => <div data-testid="zoom-control" />
+    ZoomControl: () => <div data-testid="zoom-control" />,
+    CircleMarker: ({ children }) => <div data-testid="circle-marker">{children}</div>,
+    Polyline: () => <div data-testid="polyline" />,
+    useMap: () => ({ fitBounds: vi.fn() })
   };
 });
 
 describe('LiveMap Component', () => {
-  it('renders gracefully with empty train array (fallback logic)', () => {
-    render(<LiveMap trains={[]} />);
+  beforeEach(() => {
+    useStore.setState({
+      trains: [
+        {
+          train_number: 12621,
+          train_name: 'Chennai Exp',
+          location_geo: { type: 'Point', coordinates: [80.2707, 13.0827] }, // lng, lat
+          speed: 80,
+          delay_minutes: 0,
+          status: 'nominal'
+        },
+        {
+          train_number: 12951,
+          train_name: 'Mumbai Rajdhani',
+          location_geo: { type: 'Point', coordinates: [72.8197, 18.9696] },
+          speed: 120,
+          delay_minutes: 5,
+          status: 'nominal'
+        },
+        {
+          train_number: 12259,
+          train_name: 'Howrah Duronto',
+          location_geo: { type: 'Point', coordinates: [88.2636, 22.5958] },
+          speed: 100,
+          delay_minutes: 0,
+          status: 'nominal'
+        }
+      ],
+      incidents: []
+    });
+  });
 
-    // Fallback data is expected to show 3 markers
+  it('renders gracefully with trains from store', () => {
+    render(<LiveMap />);
+
     const mapContainer = screen.getByTestId('map-container');
     expect(mapContainer).toBeInTheDocument();
 
     const markers = screen.getAllByTestId('marker');
-    expect(markers).toHaveLength(3); // 3 fallback trains
+    expect(markers).toHaveLength(3); // 3 trains in store
 
-    expect(screen.getByText('Chennai Exp')).toBeInTheDocument();
-    expect(screen.getByText('Mumbai Rajdhani')).toBeInTheDocument();
-    expect(screen.getByText('Howrah Duronto')).toBeInTheDocument();
+    expect(screen.getByText('12621')).toBeInTheDocument();
+    expect(screen.getByText('12951')).toBeInTheDocument();
+    expect(screen.getByText('12259')).toBeInTheDocument();
   });
 
-  it('renders with provided trains', () => {
+  it('renders with specific trains when store is updated', () => {
     const customTrains = [
       {
         train_number: "99999",
         train_name: "Test Express",
-        train_id: "TN-9999",
+        location_geo: { type: 'Point', coordinates: [80.0, 20.0] },
         speed: "100 km/h",
-        next_station: "XYZ",
-        distance_next: "10 KM",
-        current_station: "ABC",
         delay_minutes: 5,
-        status: "On Time",
-        lat: 20.0,
-        lng: 80.0
+        status: "nominal"
       }
     ];
 
-    render(<LiveMap trains={customTrains} />);
+    useStore.setState({ trains: customTrains });
+
+    render(<LiveMap />);
 
     const markers = screen.getAllByTestId('marker');
     expect(markers).toHaveLength(1);
 
-    expect(screen.getByText('Test Express')).toBeInTheDocument();
+    expect(screen.getByText('99999')).toBeInTheDocument();
   });
 });

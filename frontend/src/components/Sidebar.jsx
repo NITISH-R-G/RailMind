@@ -1,8 +1,12 @@
 /* eslint-disable */
 import React from 'react';
 import { LayoutDashboard, Map, BellRing, ClipboardList, BarChart3, HelpCircle, FileClock, Sliders } from 'lucide-react';
+import { useStore } from '../store';
 
-export default function Sidebar({ activeTab = 'Dashboard', setActiveTab }) {
+export default function Sidebar() {
+  const activeTab = useStore(state => state.activeTab);
+  const setActiveTab = useStore(state => state.setActiveTab);
+
   const menuItems = [
     { id: 'Dashboard', name: 'Overview', icon: LayoutDashboard },
     { id: 'Live Map', name: 'Real-Time Map', icon: Map },
@@ -19,9 +23,8 @@ export default function Sidebar({ activeTab = 'Dashboard', setActiveTab }) {
 
   return (
     <div style={{
-      width: '240px',
-      backgroundColor: '#0d1117',
-      borderRight: '1px solid #1a2433',
+      width: '100%',
+      backgroundColor: '#0A0E17',
       display: 'flex',
       flexDirection: 'column',
       justifyContent: 'space-between',
@@ -31,9 +34,9 @@ export default function Sidebar({ activeTab = 'Dashboard', setActiveTab }) {
     }}>
       <div>
         {/* Header */}
-        <div style={{ padding: '0 24px 24px 24px', borderBottom: '1px solid #1a2433' }}>
+        <div style={{ padding: '0 24px 24px 24px', borderBottom: '1px solid #26354A' }}>
           <h2 className="palantir-mono" style={{ fontSize: '15px', fontWeight: 600, color: '#e2e8f0', letterSpacing: '1px' }}>SYS // ALPHA</h2>
-          <span className="palantir-mono" style={{ fontSize: '10px', color: '#00f0ff', fontWeight: 500 }}>Monitoring: Active</span>
+          <span className="palantir-mono" style={{ fontSize: '10px', color: '#00FF66', fontWeight: 500 }}>Monitoring: Active</span>
         </div>
 
         {/* Navigation */}
@@ -51,21 +54,21 @@ export default function Sidebar({ activeTab = 'Dashboard', setActiveTab }) {
                   alignItems: 'center',
                   gap: '12px',
                   padding: '12px 16px',
-                  backgroundColor: isActive ? '#121820' : 'transparent',
+                  backgroundColor: isActive ? '#161F30' : 'transparent',
                   border: 'none',
-                  borderLeft: isActive ? '3px solid #00f0ff' : '3px solid transparent',
-                  borderRadius: '0px',
-                  color: isActive ? '#00f0ff' : '#8a9ba8',
-                  fontSize: '12px',
-                  fontWeight: 600,
-                  cursor: 'pointer',
+                  borderLeft: isActive ? '3px solid #00FF66' : '3px solid transparent',
+                  color: isActive ? '#00FF66' : '#8a9ba8',
+                  width: '100%',
                   textAlign: 'left',
+                  cursor: 'pointer',
+                  fontSize: '12px',
+                  fontWeight: isActive ? 600 : 500,
                   transition: 'all 0.2s ease',
-                  width: '100%'
+                  textTransform: 'uppercase'
                 }}
                 onMouseEnter={(e) => {
                   if (!isActive) {
-                    e.currentTarget.style.backgroundColor = '#17202b';
+                    e.currentTarget.style.backgroundColor = '#161F30';
                     e.currentTarget.style.color = '#e2e8f0';
                   }
                 }}
@@ -76,7 +79,7 @@ export default function Sidebar({ activeTab = 'Dashboard', setActiveTab }) {
                   }
                 }}
               >
-                <Icon size={16} style={{ color: isActive ? '#00f0ff' : '#5c7080' }} />
+                <Icon size={16} strokeWidth={isActive ? 2.5 : 2} />
                 {item.name}
               </button>
             );
@@ -84,8 +87,9 @@ export default function Sidebar({ activeTab = 'Dashboard', setActiveTab }) {
         </div>
       </div>
 
-      {/* Footer Nav */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', padding: '0 12px' }}>
+      {/* Bottom Actions */}
+      <div style={{ padding: '0 12px' }}>
+        <div style={{ height: '1px', backgroundColor: '#26354A', margin: '16px 12px' }}></div>
         {bottomItems.map((item) => {
           const Icon = item.icon;
           const isActive = activeTab === item.id;
@@ -98,34 +102,22 @@ export default function Sidebar({ activeTab = 'Dashboard', setActiveTab }) {
                 display: 'flex',
                 alignItems: 'center',
                 gap: '12px',
-                padding: '10px 16px',
-                backgroundColor: isActive ? '#121820' : 'transparent',
+                padding: '12px 16px',
+                backgroundColor: 'transparent',
                 border: 'none',
-                borderLeft: isActive ? '3px solid #00f0ff' : '3px solid transparent',
-                borderRadius: '0px',
-                color: isActive ? '#00f0ff' : '#5c7080',
-                fontSize: '10px',
-                fontWeight: 600,
-                letterSpacing: '0.5px',
-                cursor: 'pointer',
+                color: isActive ? '#00FF66' : '#8a9ba8',
+                width: '100%',
                 textAlign: 'left',
-                transition: 'all 0.2s ease',
-                width: '100%'
+                cursor: 'pointer',
+                fontSize: '12px',
+                fontWeight: 500,
+                transition: 'all 0.2s',
+                textTransform: 'uppercase'
               }}
-              onMouseEnter={(e) => {
-                if (!isActive) {
-                  e.currentTarget.style.backgroundColor = '#17202b';
-                  e.currentTarget.style.color = '#e2e8f0';
-                }
-              }}
-              onMouseLeave={(e) => {
-                if (!isActive) {
-                  e.currentTarget.style.backgroundColor = 'transparent';
-                  e.currentTarget.style.color = '#5c7080';
-                }
-              }}
+              onMouseEnter={(e) => { e.currentTarget.style.color = '#e2e8f0'; }}
+              onMouseLeave={(e) => { if (!isActive) e.currentTarget.style.color = '#8a9ba8'; }}
             >
-              <Icon size={14} style={{ color: '#5c7080' }} />
+              <Icon size={16} />
               {item.name}
             </button>
           );
