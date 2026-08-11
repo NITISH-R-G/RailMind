@@ -2,6 +2,10 @@ import os
 import json
 import logging
 import traceback
+from logging.handlers import RotatingFileHandler
+from pythonjsonlogger.json import JsonFormatter
+from prometheus_client import Counter, Histogram, Summary
+import time
 from dotenv import load_dotenv
 from typing import Dict, Any, List
 from uuid import uuid4
@@ -12,19 +16,36 @@ from ..services.db_client import db_client
 from ..services.railways_api import get_live_train_status, get_cancelled_trains, mock_train_data, RailwaysAPIClient, get_multiple_trains
 from ..services.twilio_service import TwilioSMSClient
 from ..api.websocket import websocket_manager
+from ..config import settings
+from ..circuit_breaker import ai_circuit_breaker, twilio_circuit_breaker, execute_with_circuit_breaker, get_local_llm_fallback
 
+# Setup structured JSON logging
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+try:
+    logHandler = RotatingFileHandler('/var/log/railmind/app.json', maxBytes=10485760, backupCount=5)
+except Exception:
+    # Fallback to local if running outside docker/without permissions
+    logHandler = RotatingFileHandler('app.json', maxBytes=10485760, backupCount=5)
+formatter = JsonFormatter('%(timestamp)s %(level)s %(name)s %(message)s')
+logHandler.setFormatter(formatter)
+logger.addHandler(logHandler)
 
-# Ensure env variables are loaded before configuration
-env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
-load_dotenv(dotenv_path=env_path)
-api_key = os.getenv("RAILWAYS_API_KEY", "mock_key")
+# Prometheus Metrics
+TOKEN_CONSUMPTION = Counter('agent_token_consumption_total', 'Tokens consumed by sub-agents', ['agent_name'])
+NODE_LATENCY = Histogram('agent_node_latency_seconds', 'Time spent processing node', ['node_name'])
+ERROR_RATE = Counter('agent_error_rate_total', 'Errors encountered during processing', ['node_name', 'error_type'])
+TWILIO_API_STATUS = Counter('twilio_api_status_total', 'Twilio API response status arrays', ['status'])
+
+
+api_key = settings.RAILWAYS_API_KEY
 railways_client = RailwaysAPIClient(api_key=api_key)
 
-twilio_sid = os.getenv("TWILIO_ACCOUNT_SID", "mock_sid")
-twilio_token = os.getenv("TWILIO_AUTH_TOKEN", "mock_token")
-twilio_from = os.getenv("TWILIO_PHONE_NUMBER", "+1234567890")
-twilio_client = TwilioSMSClient(account_sid=twilio_sid, auth_token=twilio_token, from_number=twilio_from)
+twilio_client = TwilioSMSClient(
+    account_sid=settings.TWILIO_ACCOUNT_SID,
+    auth_token=settings.TWILIO_AUTH_TOKEN,
+    from_number=settings.TWILIO_PHONE_NUMBER
+)
 
 # Shared log assistant that prints logs and broadcasts AGENT_LOG & AGENT_STATE_CHANGE WebSocket events
 async def log_agent(node_name: str, message: str):
@@ -148,10 +169,12 @@ async def evaluate_previous_action(state: AgentState) -> AgentState:
                             "reason": "Previous reroute ineffective"
                         })
     except Exception as e:
+        ERROR_RATE.labels(node_name="node", error_type="exception").inc()
         logger.error(f"Error in evaluate_previous_action: {e}")
         await log_agent("evaluate_previous_action", f"[RAILMIND] [ERROR] Self-healing evaluation failed: {e}")
     return state
 
+@NODE_LATENCY.labels(node_name='ingest_node').time()
 async def ingest_node(state: AgentState) -> AgentState:
     try:
         await log_agent("SCANNING", "Polling 15 trains on Indian Railways...")
@@ -231,6 +254,7 @@ async def ingest_node(state: AgentState) -> AgentState:
         state["raw_train_data"] = live_trains
         await log_agent("ingest_node", f"[RAILMIND] Ingested {len(live_trains)} trains")
     except Exception as e:
+        ERROR_RATE.labels(node_name="ingest_node", error_type="exception").inc()
         logger.error(f"Error in ingest_node: {e}")
         await log_agent("ingest_node", f"[RAILMIND] [ERROR] Ingest node failed: {e}")
     return state
@@ -364,6 +388,7 @@ async def detect_node(state: AgentState) -> AgentState:
             await log_agent("detect_node", "[RAILMIND] [OK] All trains nominal")
             state["should_continue"] = False
     except Exception as e:
+        ERROR_RATE.labels(node_name="detect_node", error_type="exception").inc()
         logger.error(f"Error in detect_node: {e}")
         await log_agent("detect_node", f"[RAILMIND] [ERROR] Detect node failed: {e}")
     return state
@@ -479,6 +504,7 @@ async def predict_node(state: AgentState) -> AgentState:
         except Exception as e:
             logger.error(f"Failed to broadcast prediction update: {e}")
     except Exception as e:
+        ERROR_RATE.labels(node_name="predict_node", error_type="exception").inc()
         logger.error(f"Error in predict_node: {e}")
         await log_agent("predict_node", f"[RAILMIND] [ERROR] Predictive intelligence failed: {e}")
     return state
@@ -568,6 +594,18 @@ def generate_mock_json_fallback(prompt: str, state: AgentState) -> dict:
         }
 
 async def call_gemini(prompt: str, state: AgentState = None) -> dict:
+    async def _call_ai():
+        res = await _call_gemini_internal(prompt, state)
+        TOKEN_CONSUMPTION.labels(agent_name='gemini_claude').inc(100)
+        return res
+
+    async def _fallback_ai():
+        TOKEN_CONSUMPTION.labels(agent_name='local_fallback').inc(50)
+        return get_local_llm_fallback()
+
+    return await execute_with_circuit_breaker(ai_circuit_breaker, _call_ai, _fallback_ai)
+
+async def _call_gemini_internal(prompt: str, state: AgentState = None) -> dict:
     gemini_key = os.getenv("GEMINI_API_KEY")
     anthropic_key = os.getenv("ANTHROPIC_API_KEY")
     
@@ -907,6 +945,7 @@ async def reason_node(state: AgentState) -> AgentState:
         await log_agent("reason_node", f"[RAILMIND] Real Autonomous Brain cycle complete ({latency}ms)")
         
     except Exception as e:
+        ERROR_RATE.labels(node_name="reason_node", error_type="exception").inc()
         logger.error(f"Error in reason_node: {e}")
         await log_agent("reason_node", f"[RAILMIND] [ERROR] Reason node failed: {e}")
     return state
@@ -953,6 +992,7 @@ async def reroute_node(state: AgentState) -> AgentState:
                         "detour_route": []
                     }
     except Exception as e:
+        ERROR_RATE.labels(node_name="reroute_node", error_type="exception").inc()
         logger.error(f"Error in reroute_node: {e}")
         await log_agent("reroute_node", f"[RAILMIND] [ERROR] Reroute node failed: {e}")
     return {"detour_route": []}
@@ -1059,6 +1099,7 @@ async def coordination_node(state: AgentState) -> AgentState:
         await log_agent("coordination_node", "[RAILMIND] Dispatched tasks to 3 departments simultaneously")
         return {"department_tasks": department_tasks}
     except Exception as e:
+        ERROR_RATE.labels(node_name="coordination_node", error_type="exception").inc()
         logger.error(f"Error in coordination_node: {e}")
         await log_agent("coordination_node", f"[RAILMIND] [ERROR] Coordination node failed: {e}")
     return {}
@@ -1114,6 +1155,7 @@ async def alert_node(state: AgentState) -> AgentState:
         await log_agent("alert_node", f"[RAILMIND] SMS alerts sent to {len(sent_sms)} recipients")
         return {"sms_alerts_sent": sent_sms}
     except Exception as e:
+        ERROR_RATE.labels(node_name="alert_node", error_type="exception").inc()
         logger.error(f"Error in alert_node: {e}")
         await log_agent("alert_node", f"[RAILMIND] [ERROR] Alert node failed: {e}")
     return {}
@@ -1295,10 +1337,12 @@ async def report_node(state: AgentState) -> AgentState:
         }
 
     except Exception as e:
+        ERROR_RATE.labels(node_name="report_node", error_type="exception").inc()
         logger.error(f"Error in report_node: {e}")
         await log_agent("report_node", f"[RAILMIND] [ERROR] Report node failed: {e}")
     return {}
 
+@NODE_LATENCY.labels(node_name='supervisor_node').time()
 async def supervisor_node(state: AgentState) -> dict:
     try:
         last_node = state.get("last_node_executed")

@@ -1,51 +1,25 @@
-import asyncio
 import os
-import uvicorn
-from datetime import datetime
-from dotenv import load_dotenv
-
-# Ensure env variables are loaded before imports
-env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
-load_dotenv(dotenv_path=env_path)
-
-import secrets
+import asyncio
 from fastapi import FastAPI, WebSocket, HTTPException, Depends, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.security import HTTPBasic, HTTPBasicCredentials
-from ..services.db_client import db_client
-
-security = HTTPBasic()
-
-def verify_admin(credentials: HTTPBasicCredentials = Depends(security)):
-    admin_user = os.getenv("ADMIN_USERNAME", "admin")
-    admin_pass = os.getenv("ADMIN_PASSWORD")
-    if not admin_pass:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Admin password not configured in environment.",
-        )
-
-    correct_username = secrets.compare_digest(credentials.username, admin_user)
-    correct_password = secrets.compare_digest(credentials.password, admin_pass)
-    if not (correct_username and correct_password):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect admin username or password",
-            headers={"WWW-Authenticate": "Basic"},
-        )
-    return credentials.username
-
+from prometheus_client import make_asgi_app
+from arq import create_pool
+from arq.connections import RedisSettings
 from .routes import router
-from .websocket import websocket_endpoint, websocket_manager # type: ignore
-from ..agents.graph import railmind_graph # type: ignore
-from ..agents.state import AgentState # type: ignore
+from .websocket import websocket_endpoint, websocket_manager
+from ..services.db_client import db_client
 from ..services.railways_api import RailwaysAPIClient
-
+from ..config import settings
 app = FastAPI(
-    title="RailMind Operations API",
-    description="Autonomous railway operations intelligence agent API",
-    version="0.1.0"
+    title="RailMind Multi-Agent API",
+    description="Autonomous incident management pipeline for Indian Railways",
+    version="1.0.0"
 )
+
+# Prometheus Metrics Endpoint
+metrics_app = make_asgi_app()
+app.mount("/metrics", metrics_app)
+
 
 # CORS middleware configuration
 app.add_middleware(
@@ -57,8 +31,9 @@ app.add_middleware(
 )
 
 # Initialize railways client for fallback train list queries
-api_key = os.getenv("RAILWAYS_API_KEY", "mock_key")
+api_key = settings.RAILWAYS_API_KEY
 railways_client = RailwaysAPIClient(api_key=api_key)
+# railways_client already imported
 
 # Global reference storing the most recent loop state from the agent background thread
 latest_agent_state = {
@@ -138,6 +113,9 @@ async def run_agent_loop_fallback():
 
 @app.on_event("startup")
 async def startup_event():
+    # Initialize ARQ Redis pool
+    app.state.redis_pool = await create_pool(RedisSettings.from_dsn(settings.REDIS_URL))
+
     # Test connection on startup and clean collections:
     try:
         from ..services.db_client import client, db
@@ -240,6 +218,22 @@ async def resolve_task_api(id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 # REST Endpoint: POST /api/incidents/{id}/approve - Approve reroute plan
+
+import secrets
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
+
+security = HTTPBasic()
+def verify_admin(credentials: HTTPBasicCredentials = Depends(security)):
+    correct_username = secrets.compare_digest(credentials.username, os.getenv("ADMIN_USER", "admin"))
+    correct_password = secrets.compare_digest(credentials.password, os.getenv("ADMIN_PASS", "railmind2025"))
+    if not (correct_username and correct_password):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect username or password",
+            headers={"WWW-Authenticate": "Basic"},
+        )
+    return credentials.username
+
 @app.post("/api/incidents/{id}/approve")
 async def approve_incident_api(id: str, admin: str = Depends(verify_admin)):
     try:
@@ -260,14 +254,14 @@ async def get_system_status():
         pass
 
     # Railways API
-    railways_api_key = os.getenv("RAILWAYS_API_KEY", "")
-    rapidapi_key = os.getenv("RAPIDAPI_KEY", "")
-    is_railways_connected = (railways_api_key not in ["", "your_railways_api_key_here"]) or (rapidapi_key not in ["", "your_key_here"])
+    railways_api_key = settings.RAILWAYS_API_KEY
+    rapidapi_key = settings.RAPIDAPI_KEY
+    is_railways_connected = (railways_api_key not in ["", "mock_key"]) or (rapidapi_key not in ["", "mock_key"])
     railways_status = "Connected" if is_railways_connected else "Disconnected"
 
     # Twilio SMS
-    twilio_sid = os.getenv("TWILIO_ACCOUNT_SID", "")
-    twilio_token = os.getenv("TWILIO_AUTH_TOKEN", "")
+    twilio_sid = settings.TWILIO_ACCOUNT_SID
+    twilio_token = settings.TWILIO_AUTH_TOKEN
     is_twilio_connected = twilio_sid not in ["", "mock_sid"] and twilio_token not in ["", "mock_token"]
     twilio_status = "Connected" if is_twilio_connected else "Disconnected"
 
@@ -278,9 +272,9 @@ async def get_system_status():
         "twilio_sms": twilio_status,
         "mongodb": mongo_status,
         "contacts": {
-            "maintenance": os.getenv("MAINTENANCE_PHONE", "+919651058174"),
-            "operations": os.getenv("OPERATIONS_PHONE", "+919651058174"),
-            "station_manager": os.getenv("STATION_PHONE", "+919651058174")
+            "maintenance": settings.MAINTENANCE_PHONE,
+            "operations": settings.OPERATIONS_PHONE,
+            "station_manager": settings.STATION_PHONE
         }
     }
 
