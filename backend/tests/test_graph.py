@@ -72,8 +72,9 @@ async def test_supervisor_self_correction():
     })
 
     state: AgentState = {
-        "raw_train_data": [],
+        "raw_train_data": [{"some": "data"}],
         "anomalies": [{"train_number": "12301", "train_name": "Test Train", "anomaly_type": "delay", "severity": "high", "location": "Kanpur", "delay_minutes": 100, "passenger_load": "high"}],
+        "prediction": {"some": "prediction"},
         "claude_reasoning": bad_reasoning,
         "reroute_plan": None,
         "department_tasks": [],

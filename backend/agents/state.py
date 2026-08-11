@@ -21,6 +21,11 @@ class TrainAnomaly(TypedDict):
     location: str
     delay_minutes: Optional[int]
     passenger_load: Optional[str]
+    lat: Optional[float]
+    lng: Optional[float]
+    current_station: Optional[str]
+    destination: Optional[str]
+    source: Optional[str]
 
 class DepartmentTask(TypedDict):
     department: str    # "maintenance", "operations", "station_manager"
@@ -43,11 +48,11 @@ class AgentState(TypedDict):
     ai_latency_ms: int
     processed_trains: List[str]
     target_trains: List[str]
-    errors: Annotated[List[str], append_to_list]
+    errors: Annotated[List[str], operator.add]
     next_node: str
     last_node_executed: str
-    messages: Annotated[list, operator.add]
-    tools_used: Annotated[List[str], append_to_list]
+    messages: Annotated[List[dict], operator.add]
+    tools_used: Annotated[List[str], operator.add]
     detour_route: List[str]
     perception: Optional[dict]
     decision: Optional[dict]
