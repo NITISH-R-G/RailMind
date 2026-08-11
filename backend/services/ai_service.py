@@ -206,7 +206,7 @@ Previous errors from Supervisor (if any, please correct your plan):
         # Now that tool usage is done, force structured output
         structured_llm = llm.with_structured_output(MitigationPlan)
         final_plan: MitigationPlan = await structured_llm.ainvoke(final_messages)
-        return final_plan.model_dump()
+        return final_plan.dict()
     except Exception as e:
         print(f"[RAILMIND] AI Reasoning or structured output failed, generating high-fidelity fallback: {e}")
         # Return dynamic fallback based on current anomaly parameters
