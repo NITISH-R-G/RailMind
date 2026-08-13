@@ -1,5 +1,8 @@
 /* eslint-disable */
 import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { useStore } from './store';
+import { List } from 'react-window';
+
 import Sidebar from './components/Sidebar';
 import TopBar from './components/TopBar';
 import LiveMap from './components/LiveMap';
@@ -27,7 +30,7 @@ class ErrorBoundary extends React.Component {
       return (
         <div style={{
           padding: '40px',
-          backgroundColor: '#080a0d',
+          backgroundColor: '#0A0E17',
           color: '#ff3366',
           height: '100vh',
           display: 'flex',
@@ -43,8 +46,8 @@ class ErrorBoundary extends React.Component {
             onClick={() => window.location.reload()}
             style={{
               padding: '10px 20px',
-              backgroundColor: '#00f0ff',
-              color: '#080a0d',
+              backgroundColor: '#FFB000',
+              color: '#0A0E17',
               border: 'none',
               borderRadius: '0px',
               fontWeight: 700,
@@ -63,14 +66,8 @@ class ErrorBoundary extends React.Component {
 
 function MainApp() {
   const [activeTab, setActiveTab] = useState('Dashboard');
-  const [loopCount, setLoopCount] = useState(0);
-  const [incidentCount, setIncidentCount] = useState(0);
-  const [incidents, setIncidents] = useState([]);
-  const [tasks, setTasks] = useState([]);
-  const [trains, setTrains] = useState([]);
-  const [wsStatus, setWsStatus] = useState('reconnecting');
-  const [logs, setLogs] = useState([]);
-  
+  const { loopCount, incidentCount, incidents, tasks, trains, wsStatus, logs, setIncidents, setTasks, setTrains, setWsStatus, setLoopCount, addIncident, addLog, clearLogs, updateIncidentApproved, removeIncident, resolveTask } = useStore();
+
   // Modal Overlay States
   const [showSettings, setShowSettings] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
@@ -83,8 +80,8 @@ function MainApp() {
       const inc = incidents[i];
       result.push(
         <div key={inc.id} className="palantir-mono" style={{
-          backgroundColor: '#121820',
-          border: '1px solid #1a2433',
+          backgroundColor: '#161F30',
+          border: '1px solid #26354A',
           padding: '10px 14px',
           borderRadius: '0px',
           fontSize: '11px',
@@ -207,11 +204,8 @@ function MainApp() {
               train_number: report.train_number || 'Unknown'
             };
 
-            setIncidents(prev => {
-              if (prev.some(inc => inc.id === newIncident.id)) return prev;
-              return [newIncident, ...prev];
-            });
-            setIncidentCount(prev => prev + 1);
+            addIncident(newIncident);
+
             if (report.loop_count !== undefined) {
               setLoopCount(report.loop_count);
             }
@@ -219,7 +213,7 @@ function MainApp() {
             fetchTasks();
             fetchTrains();
           } else if (payload.type === 'AGENT_LOG') {
-            setLogs(prev => [...prev, payload].slice(-200)); // Keep last 200 logs
+            addLog(payload); // Keep last 200 logs
           }
         } catch (err) {
           console.error("[WEBSOCKET] Error parsing socket data:", err);
@@ -261,12 +255,7 @@ function MainApp() {
         headers: headers
       });
       if (res.ok) {
-        setIncidents(prev => prev.map(inc => {
-          if (inc.id === incidentId) {
-            return { ...inc, approved: true };
-          }
-          return inc;
-        }));
+        updateIncidentApproved(incidentId);
       } else if (res.status === 401) {
         alert("Incorrect admin password.");
         console.error("Unauthorized: Incorrect admin password.");
@@ -280,8 +269,7 @@ function MainApp() {
 
   const handleAcknowledge = (incidentId) => {
     console.log(`Acknowledging warning incident: ${incidentId}`);
-    setIncidents(prev => prev.filter(inc => inc.id !== incidentId));
-    setIncidentCount(prev => Math.max(0, prev - 1));
+    removeIncident(incidentId);
   };
 
   const handleResolve = async (taskId) => {
@@ -291,12 +279,7 @@ function MainApp() {
         method: 'POST'
       });
       if (res.ok) {
-        setTasks(prev => prev.map(t => {
-          if (t._id === taskId || t.id === taskId) {
-            return { ...t, status: 'resolved', urgency: 'resolved' };
-          }
-          return t;
-        }));
+        resolveTask(taskId);
       } else {
         console.error("Failed to mark task resolved on API server");
       }
@@ -323,7 +306,7 @@ function MainApp() {
             <p className="palantir-mono" style={{ fontSize: '11px', color: '#5c7080' }}>OPERATIONAL ALERTS AUDIT FEED</p>
           </div>
           {/* Filters */}
-          <div style={{ display: 'flex', gap: '8px', backgroundColor: '#0d1117', padding: '4px', borderRadius: '0px', border: '1px solid #1a2433' }}>
+          <div style={{ display: 'flex', gap: '8px', backgroundColor: '#161F30', padding: '4px', borderRadius: '0px', border: '1px solid #26354A' }}>
             {['ALL', 'CRITICAL', 'WARNING', 'INFO'].map(f => (
               <button
                 key={f}
@@ -331,8 +314,8 @@ function MainApp() {
                 className="palantir-mono"
                 style={{
                   padding: '6px 12px',
-                  backgroundColor: filter === f ? '#00f0ff' : 'transparent',
-                  color: filter === f ? '#080a0d' : '#8a9ba8',
+                  backgroundColor: filter === f ? '#FFB000' : 'transparent',
+                  color: filter === f ? '#0A0E17' : '#8a9ba8',
                   border: 'none',
                   borderRadius: '0px',
                   fontSize: '10px',
@@ -349,19 +332,19 @@ function MainApp() {
 
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: '16px' }}>
           {filteredIncidents.length === 0 ? (
-            <div className="palantir-mono" style={{ gridColumn: '1 / -1', padding: '40px', textAlign: 'center', color: '#5c7080', backgroundColor: '#0d1117', border: '1px dashed #1a2433' }}>
+            <div className="palantir-mono" style={{ gridColumn: '1 / -1', padding: '40px', textAlign: 'center', color: '#5c7080', backgroundColor: '#161F30', border: '1px dashed #26354A' }}>
               [ NO ANOMALIES RECORDED FOR STATUS: {filter} ]
             </div>
           ) : (
             filteredIncidents.map(inc => {
               const isCritical = inc.severity === 'critical';
               const isWarning = inc.severity === 'warning';
-              const borderColor = isCritical ? '#ff3366' : isWarning ? '#ffb300' : '#00f0ff';
+              const borderColor = isCritical ? '#ff3366' : isWarning ? '#ffb300' : '#FFB000';
 
               return (
                 <div key={inc.id} style={{
-                  backgroundColor: '#121820',
-                  border: '1px solid #1a2433',
+                  backgroundColor: '#161F30',
+                  border: '1px solid #26354A',
                   borderLeft: `4px solid ${borderColor}`,
                   borderRadius: '0px',
                   padding: '20px',
@@ -390,7 +373,7 @@ function MainApp() {
                   {inc.reroute_plan && (
                     <div style={{
                       backgroundColor: 'rgba(0, 240, 255, 0.02)',
-                      border: '1px dashed #1a2433',
+                      border: '1px dashed #26354A',
                       padding: '12px',
                       borderRadius: '0px',
                       display: 'flex',
@@ -398,7 +381,7 @@ function MainApp() {
                       gap: '8px'
                     }}>
                       <div className="palantir-mono" style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '9px', color: '#5c7080', fontWeight: 700 }}>
-                        <CornerDownRight size={12} style={{ color: '#00f0ff' }} />
+                        <CornerDownRight size={12} style={{ color: '#FFB000' }} />
                         REROUTE PLAN COMMAND
                       </div>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px' }}>
@@ -412,8 +395,8 @@ function MainApp() {
                             onClick={() => handleApprove(inc.id)}
                             className="palantir-mono"
                             style={{
-                              backgroundColor: '#00f0ff',
-                              color: '#080a0d',
+                              backgroundColor: '#FFB000',
+                              color: '#0A0E17',
                               border: 'none',
                               borderRadius: '0px',
                               padding: '4px 10px',
@@ -429,7 +412,7 @@ function MainApp() {
                     </div>
                   )}
 
-                  <div style={{ borderTop: '1px solid #1a2433', paddingTop: '10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div style={{ borderTop: '1px solid #26354A', paddingTop: '10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <span className="palantir-mono" style={{ fontSize: '10px', color: '#5c7080' }}>
                       DISPATCH: {inc.departments.join(' // ') || 'NONE'}
                     </span>
@@ -439,7 +422,7 @@ function MainApp() {
                       style={{
                         backgroundColor: 'transparent',
                         border: 'none',
-                        color: '#00f0ff',
+                        color: '#FFB000',
                         fontSize: '11px',
                         cursor: 'pointer',
                         fontWeight: 600
@@ -451,8 +434,8 @@ function MainApp() {
 
                   {expandedIncident === inc.id && (
                     <div className="palantir-mono" style={{
-                      backgroundColor: '#080a0d',
-                      border: '1px solid #1a2433',
+                      backgroundColor: '#0A0E17',
+                      border: '1px solid #26354A',
                       padding: '12px',
                       borderRadius: '0px',
                       fontSize: '11px',
@@ -490,14 +473,14 @@ function MainApp() {
         {/* Stats Grid */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px' }}>
           {[
-            { label: 'TOTAL INCIDENTS', val: totalCount, color: '#00f0ff' },
+            { label: 'TOTAL INCIDENTS', val: totalCount, color: '#FFB000' },
             { label: 'CRITICAL ALERTS', val: criticalCount, color: '#ff3366' },
             { label: 'AGENT COGNITIVE LOOPS', val: loopCount, color: '#00e676' },
             { label: 'AVG ANOMALY RESOLUTION', val: '4.2 min', color: '#cbd5e1' }
           ].map((stat, idx) => (
             <div key={idx} style={{
-              backgroundColor: '#0d1117',
-              border: '1px solid #1a2433',
+              backgroundColor: '#161F30',
+              border: '1px solid #26354A',
               borderRadius: '0px',
               padding: '20px',
               display: 'flex',
@@ -516,8 +499,8 @@ function MainApp() {
           <div style={{
             flex: 1,
             minWidth: '340px',
-            backgroundColor: '#0d1117',
-            border: '1px solid #1a2433',
+            backgroundColor: '#161F30',
+            border: '1px solid #26354A',
             borderRadius: '0px',
             padding: '24px',
             display: 'flex',
@@ -529,7 +512,7 @@ function MainApp() {
               {[
                 { name: 'Critical', count: criticalCount, color: '#ff3366' },
                 { name: 'Warning', count: warningCount, color: '#ffb300' },
-                { name: 'Info', count: infoCount, color: '#00f0ff' }
+                { name: 'Info', count: infoCount, color: '#FFB000' }
               ].map((bar, idx) => {
                 const heightPercent = (bar.count / maxCount) * 140; // max height 140px
                 return (
@@ -552,8 +535,8 @@ function MainApp() {
           <div style={{
             flex: 1,
             minWidth: '340px',
-            backgroundColor: '#0d1117',
-            border: '1px solid #1a2433',
+            backgroundColor: '#161F30',
+            border: '1px solid #26354A',
             borderRadius: '0px',
             padding: '24px',
             display: 'flex',
@@ -562,21 +545,21 @@ function MainApp() {
           }}>
             <h3 className="palantir-mono" style={{ fontSize: '12px', fontWeight: 600, color: '#f8fafc', letterSpacing: '0.5px' }}>CORE SYSTEM STATUS REPORT</h3>
             <div className="palantir-mono" style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '11px', color: '#cbd5e1', marginTop: '10px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #1a2433', paddingBottom: '6px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #26354A', paddingBottom: '6px' }}>
                 <span>Operations Agent State</span>
                 <span style={{ color: '#00e676', fontWeight: 600 }}>[ ACTIVE // NOMINAL ]</span>
               </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #1a2433', paddingBottom: '6px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #26354A', paddingBottom: '6px' }}>
                 <span>Primary API Client</span>
                 <span style={{ color: '#ff3366' }}>[ API FALLBACK ACTIVE ]</span>
               </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #1a2433', paddingBottom: '6px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #26354A', paddingBottom: '6px' }}>
                 <span>Database Client</span>
                 <span style={{ color: '#ff3366' }}>[ JSON FALLBACK ACTIVE ]</span>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', paddingBottom: '6px' }}>
                 <span>SMS Alert Dispatcher</span>
-                <span style={{ color: '#00f0ff' }}>[ MOCK MODE ACTIVE ]</span>
+                <span style={{ color: '#FFB000' }}>[ MOCK MODE ACTIVE ]</span>
               </div>
             </div>
           </div>
@@ -589,8 +572,8 @@ function MainApp() {
     return (
       <div style={{ padding: '40px', flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '20px', color: '#e2e8f0', textAlign: 'center' }}>
         <div style={{
-          backgroundColor: '#0d1117',
-          border: '1px solid #00f0ff',
+          backgroundColor: '#161F30',
+          border: '1px solid #FFB000',
           boxShadow: '0 0 15px rgba(0, 240, 255, 0.15)',
           borderRadius: '0px',
           padding: '40px 60px',
@@ -600,13 +583,13 @@ function MainApp() {
           gap: '16px',
           maxWidth: '560px'
         }}>
-          <ShieldAlert size={48} style={{ color: '#00f0ff' }} />
+          <ShieldAlert size={48} style={{ color: '#FFB000' }} />
           <h2 className="palantir-mono" style={{ fontSize: '18px', fontWeight: 700, color: '#f8fafc', letterSpacing: '1px' }}>RAILMIND TERMINAL PORTAL</h2>
           <p className="palantir-mono" style={{ fontSize: '12px', color: '#8a9ba8', lineHeight: '1.6' }}>
             RailMind SECURE v1.0 — Multi-Agent Railway Cognitive Engine.<br />
             Secure operations console interface.
           </p>
-          <div style={{ width: '100%', height: '1px', backgroundColor: '#1a2433', margin: '10px 0' }}></div>
+          <div style={{ width: '100%', height: '1px', backgroundColor: '#26354A', margin: '10px 0' }}></div>
           <span className="palantir-mono" style={{ fontSize: '10px', color: '#ff3366', fontWeight: 600, letterSpacing: '0.5px' }}>
             [ AUTHORIZED MILITARY / COGNITIVE AGENTS ONLY • SEC-SESSION 402 ]
           </span>
@@ -616,20 +599,47 @@ function MainApp() {
   };
 
   const LogsView = ({ logs = [], onClear }) => {
-    const logEndRef = useRef(null);
+    const listRef = useRef(null);
+    const containerRef = useRef(null);
+    const [containerHeight, setContainerHeight] = useState(400);
 
     useEffect(() => {
-      if (logEndRef.current) {
-        logEndRef.current.scrollIntoView({ behavior: 'smooth' });
+      if (containerRef.current) {
+        setContainerHeight(containerRef.current.clientHeight - 40); // account for padding
+      }
+
+      const handleResize = () => {
+        if (containerRef.current) {
+           setContainerHeight(containerRef.current.clientHeight - 40);
+        }
+      }
+      window.addEventListener('resize', handleResize);
+      return () => window.removeEventListener('resize', handleResize);
+    }, []);
+
+    useEffect(() => {
+      if (listRef.current && logs.length > 0) {
+        listRef.current.scrollToItem(logs.length - 1, 'end');
       }
     }, [logs]);
+
+    const Row = ({ index, style }) => {
+      const log = logs[index];
+      return (
+        <div style={{ ...style, lineBreak: 'anywhere' }}>
+          <span style={{ color: '#ffb300' }}>{log.message.substring(0, 21)}</span>
+          <span style={{ color: '#FFB000' }}>{log.message.substring(21, 35)}</span>
+          <span style={{ color: '#e2e8f0' }}>{log.message.substring(35)}</span>
+        </div>
+      );
+    };
 
     return (
       <div style={{ padding: '24px', flex: 1, display: 'flex', flexDirection: 'column', gap: '16px', height: '100%' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div>
             <h2 className="palantir-mono" style={{ fontSize: '18px', fontWeight: 600, color: '#f8fafc', display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <Terminal size={20} style={{ color: '#00f0ff' }} />
+              <Terminal size={20} style={{ color: '#FFB000' }} />
               COGNITIVE OPERATIONS STREAM
             </h2>
             <p className="palantir-mono" style={{ fontSize: '11px', color: '#5c7080' }}>REAL-TIME AGENT STATE MACHINE TRACE</p>
@@ -640,7 +650,7 @@ function MainApp() {
             style={{
               padding: '6px 12px',
               backgroundColor: 'transparent',
-              border: '1px solid #1a2433',
+              border: '1px solid #26354A',
               borderRadius: '0px',
               color: '#8a9ba8',
               fontSize: '10px',
@@ -650,12 +660,12 @@ function MainApp() {
             }}
             onMouseEnter={e => {
               e.currentTarget.style.backgroundColor = '#17202b';
-              e.currentTarget.style.borderColor = '#00f0ff';
+              e.currentTarget.style.borderColor = '#FFB000';
               e.currentTarget.style.color = '#e2e8f0';
             }}
             onMouseLeave={e => {
               e.currentTarget.style.backgroundColor = 'transparent';
-              e.currentTarget.style.borderColor = '#1a2433';
+              e.currentTarget.style.borderColor = '#26354A';
               e.currentTarget.style.color = '#8a9ba8';
             }}
           >
@@ -663,19 +673,18 @@ function MainApp() {
           </button>
         </div>
 
-        <div style={{
+        <div ref={containerRef} style={{
           flex: 1,
           backgroundColor: '#05070a',
-          border: '1px solid #1a2433',
+          border: '1px solid #26354A',
           borderRadius: '0px',
           padding: '20px',
-          overflowY: 'auto',
+          overflow: 'hidden',
           display: 'flex',
           flexDirection: 'column',
-          gap: '8px',
           fontFamily: "'JetBrains Mono', monospace",
           fontSize: '11px',
-          color: '#00f0ff',
+          color: '#FFB000',
           boxShadow: 'inset 0 2px 10px rgba(0,0,0,0.8)'
         }}>
           {logs.length === 0 ? (
@@ -683,15 +692,16 @@ function MainApp() {
               [SYSTEM] Awaiting live logs from operations agent stream...
             </div>
           ) : (
-            logs.map((log, idx) => (
-              <div key={idx} style={{ lineBreak: 'anywhere' }}>
-                <span style={{ color: '#ffb300' }}>{log.message.substring(0, 21)}</span>
-                <span style={{ color: '#00f0ff' }}>{log.message.substring(21, 35)}</span>
-                <span style={{ color: '#e2e8f0' }}>{log.message.substring(35)}</span>
-              </div>
-            ))
+            <List
+              ref={listRef}
+              height={containerHeight}
+              itemCount={logs.length}
+              itemSize={18}
+              width="100%"
+            >
+              {Row}
+            </List>
           )}
-          <div ref={logEndRef}></div>
         </div>
       </div>
     );
@@ -728,8 +738,8 @@ function MainApp() {
     const metrics = [
       { name: 'Agent Loop Status', value: telemetry?.agent_loop_status?.toUpperCase() || 'RUNNING', color: '#00e676' },
       { name: 'Last API Call Check', value: telemetry?.last_api_call || 'Never', color: '#cbd5e1' },
-      { name: 'Indian Railways Latency', value: `${telemetry?.railways_latency_ms || 0} ms`, color: '#00f0ff' },
-      { name: 'AI Cognitive Latency', value: `${telemetry?.ai_latency_ms || 0} ms`, color: '#00f0ff' },
+      { name: 'Indian Railways Latency', value: `${telemetry?.railways_latency_ms || 0} ms`, color: '#FFB000' },
+      { name: 'AI Cognitive Latency', value: `${telemetry?.ai_latency_ms || 0} ms`, color: '#FFB000' },
       { name: 'Live WS Connections', value: telemetry?.websocket_clients || 0, color: '#ffb300' },
       { name: 'MongoDB Incident Collections', value: telemetry?.mongodb_incidents || 0, color: '#ff3366' },
       { name: 'MongoDB Task Collections', value: telemetry?.mongodb_tasks || 0, color: '#ff3366' },
@@ -745,8 +755,8 @@ function MainApp() {
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: '16px' }}>
           {metrics.map((m, idx) => (
             <div key={idx} style={{
-              backgroundColor: '#0d1117',
-              border: '1px solid #1a2433',
+              backgroundColor: '#161F30',
+              border: '1px solid #26354A',
               borderRadius: '0px',
               padding: '20px',
               display: 'flex',
@@ -798,14 +808,14 @@ function MainApp() {
         </div>
 
         <div style={{
-          backgroundColor: '#0d1117',
-          border: '1px solid #1a2433',
+          backgroundColor: '#161F30',
+          border: '1px solid #26354A',
           borderRadius: '0px',
           overflow: 'hidden'
         }}>
           <table className="palantir-mono" style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '12px' }}>
             <thead>
-              <tr style={{ backgroundColor: '#121820', borderBottom: '1px solid #1a2433', color: '#8a9ba8' }}>
+              <tr style={{ backgroundColor: '#161F30', borderBottom: '1px solid #26354A', color: '#8a9ba8' }}>
                 <th style={{ padding: '14px 16px', fontWeight: 600 }}>TRAIN NO</th>
                 <th style={{ padding: '14px 16px', fontWeight: 600 }}>NAME</th>
                 <th style={{ padding: '14px 16px', fontWeight: 600 }}>CORRIDOR ROUTE</th>
@@ -820,11 +830,11 @@ function MainApp() {
                 const statusColor = train.status === 'cancelled' ? '#ff3366' : isDelayed ? '#ffb300' : '#00e676';
                 return (
                   <tr key={idx} style={{
-                    borderBottom: '1px solid #121820',
+                    borderBottom: '1px solid #161F30',
                     color: '#cbd5e1',
-                    backgroundColor: idx % 2 === 0 ? '#0d1117' : '#0f141b'
+                    backgroundColor: idx % 2 === 0 ? '#161F30' : '#0f141b'
                   }}>
-                    <td style={{ padding: '12px 16px', fontWeight: 700, color: '#00f0ff' }}>{train.train_number}</td>
+                    <td style={{ padding: '12px 16px', fontWeight: 700, color: '#FFB000' }}>{train.train_number}</td>
                     <td style={{ padding: '12px 16px' }}>{train.train_name}</td>
                     <td style={{ padding: '12px 16px' }}>{train.source || 'NDLS'} → {train.destination || 'RKMP'}</td>
                     <td style={{ padding: '12px 16px', fontWeight: 600, color: statusColor }}>
@@ -889,8 +899,8 @@ function MainApp() {
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '16px' }}>
           {services.map((s, idx) => (
             <div key={idx} style={{
-              backgroundColor: '#0d1117',
-              border: '1px solid #1a2433',
+              backgroundColor: '#161F30',
+              border: '1px solid #26354A',
               borderRadius: '0px',
               padding: '20px',
               display: 'flex',
@@ -915,8 +925,8 @@ function MainApp() {
 
         {/* Contacts Section */}
         <div style={{
-          backgroundColor: '#0d1117',
-          border: '1px solid #1a2433',
+          backgroundColor: '#161F30',
+          border: '1px solid #26354A',
           borderRadius: '0px',
           padding: '20px',
           display: 'flex',
@@ -1011,14 +1021,14 @@ function MainApp() {
           <div style={{
             flex: 2,
             minWidth: '360px',
-            backgroundColor: '#0d1117',
-            border: '1px solid #1a2433',
+            backgroundColor: '#161F30',
+            border: '1px solid #26354A',
             padding: '24px',
             display: 'flex',
             flexDirection: 'column',
             gap: '20px'
           }}>
-            <h3 className="palantir-mono" style={{ fontSize: '13px', fontWeight: 600, color: '#00f0ff', borderBottom: '1px solid #1a2433', paddingBottom: '10px' }}>
+            <h3 className="palantir-mono" style={{ fontSize: '13px', fontWeight: 600, color: '#FFB000', borderBottom: '1px solid #26354A', paddingBottom: '10px' }}>
               INJECTION CONFIGURATION
             </h3>
 
@@ -1030,8 +1040,8 @@ function MainApp() {
                   onChange={(e) => setSelectedTrain(e.target.value)}
                   className="palantir-mono"
                   style={{
-                    backgroundColor: '#121820',
-                    border: '1px solid #1a2433',
+                    backgroundColor: '#161F30',
+                    border: '1px solid #26354A',
                     color: '#f8fafc',
                     padding: '10px',
                     fontSize: '11px',
@@ -1055,8 +1065,8 @@ function MainApp() {
                   onChange={(e) => setStatus(e.target.value)}
                   className="palantir-mono"
                   style={{
-                    backgroundColor: '#121820',
-                    border: '1px solid #1a2433',
+                    backgroundColor: '#161F30',
+                    border: '1px solid #26354A',
                     color: '#f8fafc',
                     padding: '10px',
                     fontSize: '11px',
@@ -1082,8 +1092,8 @@ function MainApp() {
                   onChange={(e) => setDelayMinutes(e.target.value)}
                   className="palantir-mono"
                   style={{
-                    backgroundColor: '#121820',
-                    border: '1px solid #1a2433',
+                    backgroundColor: '#161F30',
+                    border: '1px solid #26354A',
                     color: '#f8fafc',
                     padding: '10px',
                     fontSize: '11px',
@@ -1102,8 +1112,8 @@ function MainApp() {
                   onChange={(e) => setCurrentStation(e.target.value)}
                   className="palantir-mono"
                   style={{
-                    backgroundColor: '#121820',
-                    border: '1px solid #1a2433',
+                    backgroundColor: '#161F30',
+                    border: '1px solid #26354A',
                     color: '#f8fafc',
                     padding: '10px',
                     fontSize: '11px',
@@ -1146,7 +1156,7 @@ function MainApp() {
                   padding: '12px 20px',
                   backgroundColor: 'transparent',
                   color: '#8a9ba8',
-                  border: '1px solid #1a2433',
+                  border: '1px solid #26354A',
                   borderRadius: '0px',
                   fontWeight: 700,
                   fontSize: '11px',
@@ -1154,11 +1164,11 @@ function MainApp() {
                   transition: 'all 0.2s'
                 }}
                 onMouseEnter={e => {
-                  e.currentTarget.style.borderColor = '#00f0ff';
+                  e.currentTarget.style.borderColor = '#FFB000';
                   e.currentTarget.style.color = '#e2e8f0';
                 }}
                 onMouseLeave={e => {
-                  e.currentTarget.style.borderColor = '#1a2433';
+                  e.currentTarget.style.borderColor = '#26354A';
                   e.currentTarget.style.color = '#8a9ba8';
                 }}
               >
@@ -1170,8 +1180,8 @@ function MainApp() {
           <div style={{
             flex: 1,
             minWidth: '280px',
-            backgroundColor: '#0d1117',
-            border: '1px dashed #1a2433',
+            backgroundColor: '#161F30',
+            border: '1px dashed #26354A',
             padding: '24px',
             display: 'flex',
             flexDirection: 'column',
@@ -1183,23 +1193,23 @@ function MainApp() {
             
             <div className="palantir-mono" style={{ display: 'flex', flexDirection: 'column', gap: '12px', fontSize: '11px', color: '#8a9ba8' }}>
               <div style={{ display: 'flex', gap: '8px' }}>
-                <span style={{ color: '#00f0ff', fontWeight: 700 }}>1.</span>
+                <span style={{ color: '#FFB000', fontWeight: 700 }}>1.</span>
                 <span>Telemetry data is overridden with the custom coordinates and delays.</span>
               </div>
               <div style={{ display: 'flex', gap: '8px' }}>
-                <span style={{ color: '#00f0ff', fontWeight: 700 }}>2.</span>
+                <span style={{ color: '#FFB000', fontWeight: 700 }}>2.</span>
                 <span>The **Detect Node** classifies the state and logs the anomaly severity.</span>
               </div>
               <div style={{ display: 'flex', gap: '8px' }}>
-                <span style={{ color: '#00f0ff', fontWeight: 700 }}>3.</span>
+                <span style={{ color: '#FFB000', fontWeight: 700 }}>3.</span>
                 <span>The **Reason Node** uses Gemini/Claude to formulate mitigation plans.</span>
               </div>
               <div style={{ display: 'flex', gap: '8px' }}>
-                <span style={{ color: '#00f0ff', fontWeight: 700 }}>4.</span>
+                <span style={{ color: '#FFB000', fontWeight: 700 }}>4.</span>
                 <span>**Dijkstra Detours** calculates emergency bypass routes.</span>
               </div>
               <div style={{ display: 'flex', gap: '8px' }}>
-                <span style={{ color: '#00f0ff', fontWeight: 700 }}>5.</span>
+                <span style={{ color: '#FFB000', fontWeight: 700 }}>5.</span>
                 <span>**Coordination Agents** dispatch tasks to all operational desks.</span>
               </div>
             </div>
@@ -1218,8 +1228,8 @@ function MainApp() {
               display: 'flex',
               flexDirection: 'column',
               flex: 1,
-              borderRight: '1px solid #1a2433',
-              backgroundColor: '#080a0d'
+              borderRight: '1px solid #26354A',
+              backgroundColor: '#0A0E17'
             }}>
               <div style={{ flex: 1, position: 'relative' }}>
                 <LiveMap trains={trains} incidents={incidents} />
@@ -1258,7 +1268,7 @@ function MainApp() {
         return <SupportView />;
 
       case 'Logs':
-        return <LogsView logs={logs} onClear={() => setLogs([])} />;
+        return <LogsView logs={logs} onClear={() => clearLogs()} />;
 
       case 'Sensor Data':
         return <RouteIntelligence trains={trains} />;
@@ -1282,7 +1292,7 @@ function MainApp() {
       display: 'flex',
       flexDirection: 'column',
       height: '100vh',
-      backgroundColor: '#080a0d',
+      backgroundColor: '#0A0E17',
       overflow: 'hidden'
     }}>
       <TopBar 
@@ -1353,8 +1363,8 @@ function MainApp() {
           backdropFilter: 'blur(3px)'
         }}>
           <div style={{
-            backgroundColor: '#0d1117',
-            border: '1px solid #00f0ff',
+            backgroundColor: '#161F30',
+            border: '1px solid #FFB000',
             borderRadius: '0px',
             padding: '24px',
             width: '420px',
@@ -1365,7 +1375,7 @@ function MainApp() {
           }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <h3 className="palantir-mono" style={{ fontSize: '14px', fontWeight: 600, color: '#f8fafc', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <Settings size={18} style={{ color: '#00f0ff' }} />
+                <Settings size={18} style={{ color: '#FFB000' }} />
                 SYSTEM // CONFIGURATION
               </h3>
               <button onClick={() => setShowSettings(false)} style={{ backgroundColor: 'transparent', border: 'none', color: '#5c7080', cursor: 'pointer' }}>
@@ -1375,13 +1385,13 @@ function MainApp() {
             
             <div className="palantir-mono" style={{ display: 'flex', flexDirection: 'column', gap: '12px', fontSize: '11px', color: '#cbd5e1' }}>
               <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
-                <input type="checkbox" defaultChecked style={{ accentColor: '#00f0ff' }} /> ALLOW COGNITIVE REROUTING DISPATCH
+                <input type="checkbox" defaultChecked style={{ accentColor: '#FFB000' }} /> ALLOW COGNITIVE REROUTING DISPATCH
               </label>
               <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
-                <input type="checkbox" defaultChecked style={{ accentColor: '#00f0ff' }} /> TELEMETRY CACHE / DATABASE FALLBACK
+                <input type="checkbox" defaultChecked style={{ accentColor: '#FFB000' }} /> TELEMETRY CACHE / DATABASE FALLBACK
               </label>
               <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
-                <input type="checkbox" defaultChecked style={{ accentColor: '#00f0ff' }} /> ENABLE REAL-TIME WS STREAMING
+                <input type="checkbox" defaultChecked style={{ accentColor: '#FFB000' }} /> ENABLE REAL-TIME WS STREAMING
               </label>
             </div>
 
@@ -1391,8 +1401,8 @@ function MainApp() {
               style={{
                 marginTop: '10px',
                 padding: '8px 16px',
-                backgroundColor: '#00f0ff',
-                color: '#080a0d',
+                backgroundColor: '#FFB000',
+                color: '#0A0E17',
                 border: 'none',
                 borderRadius: '0px',
                 fontWeight: 700,
@@ -1422,7 +1432,7 @@ function MainApp() {
           backdropFilter: 'blur(3px)'
         }}>
           <div style={{
-            backgroundColor: '#0d1117',
+            backgroundColor: '#161F30',
             border: '1px solid #ff3366',
             borderRadius: '0px',
             padding: '24px',
@@ -1471,8 +1481,8 @@ function MainApp() {
           backdropFilter: 'blur(3px)'
         }}>
           <div style={{
-            backgroundColor: '#0d1117',
-            border: '1px solid #00f0ff',
+            backgroundColor: '#161F30',
+            border: '1px solid #FFB000',
             borderRadius: '0px',
             padding: '28px',
             width: '380px',
@@ -1494,7 +1504,7 @@ function MainApp() {
               height: '80px',
               borderRadius: '0px',
               overflow: 'hidden',
-              border: '1px solid #00f0ff',
+              border: '1px solid #FFB000',
               boxShadow: '0 0 15px rgba(0, 240, 255, 0.3)'
             }}>
               <img 
@@ -1506,10 +1516,10 @@ function MainApp() {
 
             <div>
               <h3 className="palantir-mono" style={{ fontSize: '15px', fontWeight: 700, color: '#f8fafc' }}>OPERATOR // SHREYAM</h3>
-              <p className="palantir-mono" style={{ fontSize: '11px', color: '#00f0ff', fontWeight: 600 }}>CHIEF OPERATIONS MANAGER</p>
+              <p className="palantir-mono" style={{ fontSize: '11px', color: '#FFB000', fontWeight: 600 }}>CHIEF OPERATIONS MANAGER</p>
             </div>
 
-            <div style={{ width: '100%', height: '1px', backgroundColor: '#1a2433' }}></div>
+            <div style={{ width: '100%', height: '1px', backgroundColor: '#26354A' }}></div>
 
             <div className="palantir-mono" style={{ alignSelf: 'stretch', display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '11px', color: '#cbd5e1' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}>
