@@ -84,10 +84,10 @@ const MiniIndiaMap = ({ lat, lng, severityColor }) => {
     <div style={{
       width: `${width}px`,
       height: `${height}px`,
-      border: '1px solid #1a2433',
+      border: '1px solid #26354A',
       backgroundColor: '#05070a',
       position: 'relative',
-      borderRadius: '2px',
+      borderRadius: '0px',
       overflow: 'hidden',
       flexShrink: 0
     }}>
@@ -96,7 +96,7 @@ const MiniIndiaMap = ({ lat, lng, severityColor }) => {
         <polygon
           points="20,4 40,4 48,15 44,26 60,26 68,45 74,58 66,63 62,75 52,80 40,85 35,82 30,73 22,63 14,57 9,48 11,38 16,35 14,28 20,22"
           fill="none"
-          stroke="#1a2433"
+          stroke="#26354A"
           strokeWidth="1"
           strokeDasharray="2,2"
         />
@@ -198,7 +198,7 @@ export default function IncidentFeed({ incidents = [], onApprove, onOverride, on
       case 'high':
         return { color: '#ffb300', bg: 'rgba(255, 179, 0, 0.05)', icon: AlertTriangle };
       default:
-        return { color: '#00f0ff', bg: 'rgba(0, 240, 255, 0.05)', icon: Info };
+        return { color: '#FFB000', bg: 'rgba(0, 240, 255, 0.05)', icon: Info };
     }
   };
 
@@ -229,8 +229,8 @@ export default function IncidentFeed({ incidents = [], onApprove, onOverride, on
   return (
     <div style={{
       width: '340px',
-      backgroundColor: '#0d1117',
-      borderLeft: '1px solid #1a2433',
+      backgroundColor: '#161F30',
+      borderLeft: '1px solid #26354A',
       display: 'flex',
       flexDirection: 'column',
       height: '100%',
@@ -239,11 +239,11 @@ export default function IncidentFeed({ incidents = [], onApprove, onOverride, on
       {/* Header */}
       <div style={{
         padding: '16px 20px',
-        borderBottom: '1px solid #1a2433',
+        borderBottom: '1px solid #26354A',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
-        backgroundColor: '#0d1117'
+        backgroundColor: '#161F30'
       }}>
         <div>
           <h2 className="palantir-mono" style={{ fontSize: '11px', fontWeight: 700, color: '#f8fafc', letterSpacing: '1px', margin: 0 }}>
@@ -278,7 +278,7 @@ export default function IncidentFeed({ incidents = [], onApprove, onOverride, on
             fontSize: '11px',
             textAlign: 'center',
             padding: '30px 10px',
-            border: '1px dashed #1a2433'
+            border: '1px dashed #26354A'
           }}>
             [ NO ACTIVE OPERATIONS ALERTS RECORDED ]
           </div>
@@ -307,8 +307,8 @@ export default function IncidentFeed({ incidents = [], onApprove, onOverride, on
               <div 
                 key={incident.id} 
                 style={{
-                  backgroundColor: '#121820',
-                  border: `1px solid #1a2433`,
+                  backgroundColor: '#161F30',
+                  border: `1px solid #26354A`,
                   borderLeft: `3px solid ${severityStyles.color}`,
                   padding: '14px',
                   display: 'flex',
@@ -361,8 +361,8 @@ export default function IncidentFeed({ incidents = [], onApprove, onOverride, on
                     border: '1px solid rgba(0, 240, 255, 0.2)',
                     padding: '8px',
                     fontSize: '9px',
-                    color: '#00f0ff',
-                    borderRadius: '2px',
+                    color: '#FFB000',
+                    borderRadius: '0px',
                     display: 'flex',
                     alignItems: 'flex-start',
                     gap: '6px'
@@ -375,14 +375,14 @@ export default function IncidentFeed({ incidents = [], onApprove, onOverride, on
                 {/* Agent Decision */}
                 <div style={{
                   backgroundColor: '#0a0d14',
-                  border: '1px solid #1a2433',
+                  border: '1px solid #26354A',
                   padding: '10px',
                   display: 'flex',
                   flexDirection: 'column',
                   gap: '4px'
                 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #121820', paddingBottom: '4px' }}>
-                    <span style={{ fontSize: '9px', fontWeight: 700, color: '#00f0ff' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #161F30', paddingBottom: '4px' }}>
+                    <span style={{ fontSize: '9px', fontWeight: 700, color: '#FFB000' }}>
                       AGENT DECISION ({confidenceScore}% confidence)
                     </span>
                   </div>
@@ -415,7 +415,7 @@ export default function IncidentFeed({ incidents = [], onApprove, onOverride, on
                   gap: '4px',
                   padding: '6px 8px',
                   backgroundColor: 'rgba(26, 36, 51, 0.2)',
-                  border: '1px solid #1a2433'
+                  border: '1px solid #26354A'
                 }}>
                   <span style={{ fontSize: '8px', color: '#5c7080', fontWeight: 700, letterSpacing: '0.5px' }}>
                     DEPARTMENTS NOTIFIED ✓✓✓
@@ -437,7 +437,7 @@ export default function IncidentFeed({ incidents = [], onApprove, onOverride, on
                 {isOverriding && (
                   <div 
                     style={{
-                      borderTop: '1px solid #1a2433',
+                      borderTop: '1px solid #26354A',
                       paddingTop: '8px',
                       display: 'flex',
                       flexDirection: 'column',
@@ -490,7 +490,7 @@ export default function IncidentFeed({ incidents = [], onApprove, onOverride, on
                         style={{
                           padding: '3px 8px',
                           backgroundColor: '#00e676',
-                          color: '#080a0d',
+                          color: '#0A0E17',
                           border: 'none',
                           fontSize: '8px',
                           fontWeight: 700,
@@ -504,7 +504,7 @@ export default function IncidentFeed({ incidents = [], onApprove, onOverride, on
                 )}
 
                 {/* Footer Buttons: APPROVE / OVERRIDE / EXPAND */}
-                <div style={{ display: 'flex', gap: '6px', borderTop: '1px solid #1a2433', paddingTop: '8px' }} onClick={e => e.stopPropagation()}>
+                <div style={{ display: 'flex', gap: '6px', borderTop: '1px solid #26354A', paddingTop: '8px' }} onClick={e => e.stopPropagation()}>
                   {incident.approved ? (
                     <div style={{ display: 'flex', alignItems: 'center', gap: '4px', color: '#00e676', flex: 1, fontSize: '9px', fontWeight: 'bold' }}>
                       <CheckCircle2 size={10} /> DETOURS APPROVED
@@ -517,7 +517,7 @@ export default function IncidentFeed({ incidents = [], onApprove, onOverride, on
                           flex: 1,
                           padding: '4px 8px',
                           backgroundColor: '#00e676',
-                          color: '#080a0d',
+                          color: '#0A0E17',
                           border: 'none',
                           fontSize: '9px',
                           fontWeight: '800',
@@ -535,7 +535,7 @@ export default function IncidentFeed({ incidents = [], onApprove, onOverride, on
                           flex: 1,
                           padding: '4px 8px',
                           backgroundColor: '#ffb300',
-                          color: '#080a0d',
+                          color: '#0A0E17',
                           border: 'none',
                           fontSize: '9px',
                           fontWeight: '800',
@@ -550,7 +550,7 @@ export default function IncidentFeed({ incidents = [], onApprove, onOverride, on
                      onClick={() => toggleExpand(incident.id)}
                      style={{
                        padding: '4px 8px',
-                       backgroundColor: '#1a2433',
+                       backgroundColor: '#26354A',
                        color: '#cbd5e1',
                        border: 'none',
                        fontSize: '9px',
@@ -565,8 +565,8 @@ export default function IncidentFeed({ incidents = [], onApprove, onOverride, on
                 {/* Expandable description section */}
                 {isExpanded && (
                   <div style={{
-                    backgroundColor: '#080a0d',
-                    border: '1px solid #1a2433',
+                    backgroundColor: '#0A0E17',
+                    border: '1px solid #26354A',
                     padding: '8px',
                     fontSize: '9px',
                     color: '#8a9ba8',
@@ -585,7 +585,7 @@ export default function IncidentFeed({ incidents = [], onApprove, onOverride, on
       {/* Bottom Filter & Export Toggle */}
       <div style={{
         padding: '12px 16px',
-        borderTop: '1px solid #1a2433',
+        borderTop: '1px solid #26354A',
         display: 'flex',
         justifyContent: 'space-between',
         alignItems: 'center',
@@ -607,11 +607,11 @@ export default function IncidentFeed({ incidents = [], onApprove, onOverride, on
             />
             <span style={{
               position: 'absolute', cursor: 'pointer', top: 0, left: 0, right: 0, bottom: 0,
-              backgroundColor: logExport ? '#00e676' : '#1a2433', transition: '.2s', borderRadius: '8px'
+              backgroundColor: logExport ? '#00e676' : '#26354A', transition: '.2s', borderRadius: '0px'
             }}>
               <span style={{
                 position: 'absolute', content: '""', height: '10px', width: '10px', left: logExport ? '15px' : '3px', bottom: '3px',
-                backgroundColor: logExport ? '#080a0d' : '#8a9ba8', transition: '.2s', borderRadius: '50%'
+                backgroundColor: logExport ? '#0A0E17' : '#8a9ba8', transition: '.2s', borderRadius: '50%'
               }} />
             </span>
           </label>

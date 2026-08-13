@@ -20,8 +20,8 @@ export default function Sidebar({ activeTab = 'Dashboard', setActiveTab }) {
   return (
     <div style={{
       width: '240px',
-      backgroundColor: '#0d1117',
-      borderRight: '1px solid #1a2433',
+      backgroundColor: '#161F30',
+      borderRight: '1px solid #26354A',
       display: 'flex',
       flexDirection: 'column',
       justifyContent: 'space-between',
@@ -31,9 +31,9 @@ export default function Sidebar({ activeTab = 'Dashboard', setActiveTab }) {
     }}>
       <div>
         {/* Header */}
-        <div style={{ padding: '0 24px 24px 24px', borderBottom: '1px solid #1a2433' }}>
+        <div style={{ padding: '0 24px 24px 24px', borderBottom: '1px solid #26354A' }}>
           <h2 className="palantir-mono" style={{ fontSize: '15px', fontWeight: 600, color: '#e2e8f0', letterSpacing: '1px' }}>SYS // ALPHA</h2>
-          <span className="palantir-mono" style={{ fontSize: '10px', color: '#00f0ff', fontWeight: 500 }}>Monitoring: Active</span>
+          <span className="palantir-mono" style={{ fontSize: '10px', color: '#FFB000', fontWeight: 500 }}>Monitoring: Active</span>
         </div>
 
         {/* Navigation */}
@@ -51,11 +51,11 @@ export default function Sidebar({ activeTab = 'Dashboard', setActiveTab }) {
                   alignItems: 'center',
                   gap: '12px',
                   padding: '12px 16px',
-                  backgroundColor: isActive ? '#121820' : 'transparent',
+                  backgroundColor: isActive ? '#161F30' : 'transparent',
                   border: 'none',
-                  borderLeft: isActive ? '3px solid #00f0ff' : '3px solid transparent',
+                  borderLeft: isActive ? '3px solid #FFB000' : '3px solid transparent',
                   borderRadius: '0px',
-                  color: isActive ? '#00f0ff' : '#8a9ba8',
+                  color: isActive ? '#FFB000' : '#8a9ba8',
                   fontSize: '12px',
                   fontWeight: 600,
                   cursor: 'pointer',
@@ -76,7 +76,7 @@ export default function Sidebar({ activeTab = 'Dashboard', setActiveTab }) {
                   }
                 }}
               >
-                <Icon size={16} style={{ color: isActive ? '#00f0ff' : '#5c7080' }} />
+                <Icon size={16} style={{ color: isActive ? '#FFB000' : '#5c7080' }} />
                 {item.name}
               </button>
             );
@@ -99,11 +99,11 @@ export default function Sidebar({ activeTab = 'Dashboard', setActiveTab }) {
                 alignItems: 'center',
                 gap: '12px',
                 padding: '10px 16px',
-                backgroundColor: isActive ? '#121820' : 'transparent',
+                backgroundColor: isActive ? '#161F30' : 'transparent',
                 border: 'none',
-                borderLeft: isActive ? '3px solid #00f0ff' : '3px solid transparent',
+                borderLeft: isActive ? '3px solid #FFB000' : '3px solid transparent',
                 borderRadius: '0px',
-                color: isActive ? '#00f0ff' : '#5c7080',
+                color: isActive ? '#FFB000' : '#5c7080',
                 fontSize: '10px',
                 fontWeight: 600,
                 letterSpacing: '0.5px',

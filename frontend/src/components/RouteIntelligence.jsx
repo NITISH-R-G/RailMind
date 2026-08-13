@@ -33,15 +33,15 @@ export default function RouteIntelligence({ trains = [] }) {
       {/* Route Tree Navigation (Left Column) */}
       <div style={{
         width: '240px',
-        backgroundColor: '#0d1117',
-        borderRight: '1px solid #1a2433',
+        backgroundColor: '#161F30',
+        borderRight: '1px solid #26354A',
         display: 'flex',
         flexDirection: 'column',
         height: '100%',
         padding: '16px 0',
         flexShrink: 0
       }}>
-        <div style={{ padding: '0 16px 12px 16px', borderBottom: '1px solid #1a2433' }}>
+        <div style={{ padding: '0 16px 12px 16px', borderBottom: '1px solid #26354A' }}>
           <span className="palantir-mono" style={{ fontSize: '12px', fontWeight: 600, color: '#e2e8f0', letterSpacing: '0.5px' }}>Route Tree</span>
         </div>
         
@@ -50,7 +50,7 @@ export default function RouteIntelligence({ trains = [] }) {
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '6px 8px', cursor: 'pointer', color: '#e2e8f0' }}>
               <ChevronDown size={14} style={{ color: '#5c7080' }} />
-              <Folder size={14} style={{ color: '#00f0ff' }} />
+              <Folder size={14} style={{ color: '#FFB000' }} />
               <span className="palantir-mono" style={{ fontSize: '11px', fontWeight: 600 }}>Rail Network</span>
             </div>
             
@@ -76,8 +76,8 @@ export default function RouteIntelligence({ trains = [] }) {
                         style={{
                           display: 'flex', alignItems: 'center', gap: '6px', padding: '6px 12px', cursor: 'pointer',
                           backgroundColor: selectedTrain === tr ? 'rgba(0, 240, 255, 0.08)' : 'transparent',
-                          color: selectedTrain === tr ? '#00f0ff' : '#8a9ba8',
-                          borderLeft: selectedTrain === tr ? '2px solid #00f0ff' : '2px solid transparent'
+                          color: selectedTrain === tr ? '#FFB000' : '#8a9ba8',
+                          borderLeft: selectedTrain === tr ? '2px solid #FFB000' : '2px solid transparent'
                         }}
                       >
                         <Train size={12} />
@@ -108,8 +108,8 @@ export default function RouteIntelligence({ trains = [] }) {
                         style={{
                           display: 'flex', alignItems: 'center', gap: '6px', padding: '6px 12px', cursor: 'pointer',
                           backgroundColor: selectedTrain === tr ? 'rgba(0, 240, 255, 0.08)' : 'transparent',
-                          color: selectedTrain === tr ? '#00f0ff' : '#8a9ba8',
-                          borderLeft: selectedTrain === tr ? '2px solid #00f0ff' : '2px solid transparent'
+                          color: selectedTrain === tr ? '#FFB000' : '#8a9ba8',
+                          borderLeft: selectedTrain === tr ? '2px solid #FFB000' : '2px solid transparent'
                         }}
                       >
                         <Train size={12} />
@@ -128,7 +128,7 @@ export default function RouteIntelligence({ trains = [] }) {
       {/* Center Console Workspace */}
       <div style={{
         flex: 1,
-        backgroundColor: '#080a0d',
+        backgroundColor: '#0A0E17',
         display: 'flex',
         flexDirection: 'column',
         height: '100%',
@@ -138,24 +138,24 @@ export default function RouteIntelligence({ trains = [] }) {
         {/* Breadcrumb Header */}
         <div style={{
           padding: '16px 24px',
-          borderBottom: '1px solid #1a2433',
+          borderBottom: '1px solid #26354A',
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center',
-          backgroundColor: '#0d1117'
+          backgroundColor: '#161F30'
         }}>
           <div className="palantir-mono" style={{ fontSize: '11px', color: '#8a9ba8' }}>
-            Rail Network &gt; {activeRoute.sector} &gt; <span style={{ color: '#00f0ff', fontWeight: 600 }}>{activeRoute.train}</span>
+            Rail Network &gt; {activeRoute.sector} &gt; <span style={{ color: '#FFB000', fontWeight: 600 }}>{activeRoute.train}</span>
           </div>
           
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <span className="palantir-mono" style={{
               fontSize: '10px',
-              backgroundColor: '#121820',
-              border: '1px solid #1a2433',
+              backgroundColor: '#161F30',
+              border: '1px solid #26354A',
               color: '#8a9ba8',
               padding: '4px 10px',
-              borderRadius: '2px'
+              borderRadius: '0px'
             }}>
               ⚙ Last 24h
             </span>
@@ -170,8 +170,8 @@ export default function RouteIntelligence({ trains = [] }) {
             {/* Speed Metric */}
             <div style={{
               flex: 1,
-              backgroundColor: '#0d1117',
-              border: '1px solid #1a2433',
+              backgroundColor: '#161F30',
+              border: '1px solid #26354A',
               padding: '16px',
               position: 'relative'
             }}>
@@ -184,7 +184,7 @@ export default function RouteIntelligence({ trains = [] }) {
               {/* Sparkline SVG */}
               <div style={{ marginTop: '10px', height: '32px' }}>
                 <svg width="100%" height="100%" viewBox="0 0 100 30" preserveAspectRatio="none">
-                  <path d="M0 25 Q15 5, 30 18 T60 8 T90 20 L100 15" fill="none" stroke="#00f0ff" strokeWidth={1.5} />
+                  <path d="M0 25 Q15 5, 30 18 T60 8 T90 20 L100 15" fill="none" stroke="#FFB000" strokeWidth={1.5} />
                 </svg>
               </div>
             </div>
@@ -192,8 +192,8 @@ export default function RouteIntelligence({ trains = [] }) {
             {/* Fuel Efficiency */}
             <div style={{
               flex: 1,
-              backgroundColor: '#0d1117',
-              border: '1px solid #1a2433',
+              backgroundColor: '#161F30',
+              border: '1px solid #26354A',
               padding: '16px',
               position: 'relative'
             }}>
@@ -216,8 +216,8 @@ export default function RouteIntelligence({ trains = [] }) {
             {/* Delay Probability */}
             <div style={{
               flex: 1,
-              backgroundColor: '#0d1117',
-              border: '1px solid #1a2433',
+              backgroundColor: '#161F30',
+              border: '1px solid #26354A',
               padding: '16px',
               display: 'flex',
               justifyContent: 'space-between',
@@ -231,7 +231,7 @@ export default function RouteIntelligence({ trains = [] }) {
               {/* Circular Progress Ring */}
               <div style={{ width: '48px', height: '48px', position: 'relative' }}>
                 <svg width="100%" height="100%" viewBox="0 0 36 36">
-                  <path d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="#1a2433" strokeWidth={3} />
+                  <path d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="#26354A" strokeWidth={3} />
                   <path d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="#00e676" strokeWidth={3} strokeDasharray={`${activeRoute.delayProb}, 100`} />
                 </svg>
               </div>
@@ -246,8 +246,8 @@ export default function RouteIntelligence({ trains = [] }) {
           
           <div style={{
             flex: 1,
-            backgroundColor: '#0d1117',
-            border: '1px solid #1a2433',
+            backgroundColor: '#161F30',
+            border: '1px solid #26354A',
             display: 'flex',
             flexDirection: 'column',
             overflow: 'hidden'
@@ -256,8 +256,8 @@ export default function RouteIntelligence({ trains = [] }) {
             <div style={{
               display: 'flex',
               padding: '12px 16px',
-              borderBottom: '1px solid #1a2433',
-              backgroundColor: '#121820'
+              borderBottom: '1px solid #26354A',
+              backgroundColor: '#161F30'
             }}>
               {['12:00', '13:00', '14:00', '15:00', '16:00', '17:00', '18:00'].map((hour, index) => (
                 <div key={index} className="palantir-mono" style={{ flex: 1, textAlign: 'center', fontSize: '10px', color: '#5c7080' }}>
@@ -280,7 +280,7 @@ export default function RouteIntelligence({ trains = [] }) {
                     backgroundColor: '#ff3366', borderLeft: '4px solid #ff3366',
                     padding: '6px 10px', display: 'flex', flexDirection: 'column', justifyContent: 'center'
                   }}>
-                    <span className="palantir-mono" style={{ fontSize: '10px', color: '#080a0d', fontWeight: 700 }}>Delayed</span>
+                    <span className="palantir-mono" style={{ fontSize: '10px', color: '#0A0E17', fontWeight: 700 }}>Delayed</span>
                   </div>
                 </div>
               </div>
@@ -296,7 +296,7 @@ export default function RouteIntelligence({ trains = [] }) {
                     backgroundColor: '#00e676', borderLeft: '4px solid #00e676',
                     padding: '6px 10px', display: 'flex', flexDirection: 'column', justifyContent: 'center'
                   }}>
-                    <span className="palantir-mono" style={{ fontSize: '10px', color: '#080a0d', fontWeight: 700 }}>On Time</span>
+                    <span className="palantir-mono" style={{ fontSize: '10px', color: '#0A0E17', fontWeight: 700 }}>On Time</span>
                   </div>
                 </div>
               </div>
@@ -312,7 +312,7 @@ export default function RouteIntelligence({ trains = [] }) {
                     backgroundColor: '#ffb300', borderLeft: '4px solid #ffb300',
                     padding: '6px 10px', display: 'flex', flexDirection: 'column', justifyContent: 'center'
                   }}>
-                    <span className="palantir-mono" style={{ fontSize: '10px', color: '#080a0d', fontWeight: 700 }}>Signal Warning</span>
+                    <span className="palantir-mono" style={{ fontSize: '10px', color: '#0A0E17', fontWeight: 700 }}>Signal Warning</span>
                   </div>
                 </div>
               </div>
@@ -326,8 +326,8 @@ export default function RouteIntelligence({ trains = [] }) {
       {/* AI Insights & Recommendation Panel (Right Column) */}
       <div style={{
         width: '320px',
-        backgroundColor: '#0d1117',
-        borderLeft: '1px solid #1a2433',
+        backgroundColor: '#161F30',
+        borderLeft: '1px solid #26354A',
         display: 'flex',
         flexDirection: 'column',
         height: '100%',
@@ -336,7 +336,7 @@ export default function RouteIntelligence({ trains = [] }) {
         {/* Header */}
         <div style={{
           padding: '20px',
-          borderBottom: '1px solid #1a2433',
+          borderBottom: '1px solid #26354A',
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center'
@@ -355,12 +355,12 @@ export default function RouteIntelligence({ trains = [] }) {
           
           {/* Performance Summary */}
           <div style={{
-            backgroundColor: '#121820',
-            border: '1px solid #1a2433',
+            backgroundColor: '#161F30',
+            border: '1px solid #26354A',
             padding: '16px',
-            borderRadius: '2px'
+            borderRadius: '0px'
           }}>
-            <h4 className="palantir-mono" style={{ fontSize: '11px', color: '#00f0ff', marginBottom: '8px', fontWeight: 700 }}>
+            <h4 className="palantir-mono" style={{ fontSize: '11px', color: '#FFB000', marginBottom: '8px', fontWeight: 700 }}>
               ⎎ Performance Summary
             </h4>
             <p style={{ fontSize: '12px', color: '#cbd5e1', lineHeight: '1.5' }}>
@@ -370,10 +370,10 @@ export default function RouteIntelligence({ trains = [] }) {
 
           {/* Suggested Optimizations */}
           <div style={{
-            backgroundColor: '#121820',
-            border: '1px solid #1a2433',
+            backgroundColor: '#161F30',
+            border: '1px solid #26354A',
             padding: '16px',
-            borderRadius: '2px',
+            borderRadius: '0px',
             display: 'flex',
             flexDirection: 'column',
             gap: '12px'
@@ -386,8 +386,8 @@ export default function RouteIntelligence({ trains = [] }) {
             </p>
             <button style={{
               backgroundColor: '#1c2430',
-              border: '1px solid #1a2433',
-              color: '#00f0ff',
+              border: '1px solid #26354A',
+              color: '#FFB000',
               padding: '8px 16px',
               fontSize: '11px',
               fontWeight: 700,
@@ -401,10 +401,10 @@ export default function RouteIntelligence({ trains = [] }) {
 
           {/* Anomaly Detection Status block */}
           <div style={{
-            backgroundColor: '#121820',
-            border: '1px solid #1a2433',
+            backgroundColor: '#161F30',
+            border: '1px solid #26354A',
             padding: '16px',
-            borderRadius: '2px'
+            borderRadius: '0px'
           }}>
             <h4 className="palantir-mono" style={{ fontSize: '11px', color: '#5c7080', marginBottom: '8px', fontWeight: 700 }}>
               🛡 Anomaly Detection

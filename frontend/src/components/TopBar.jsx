@@ -11,8 +11,8 @@ export default function TopBar({ loopCount = 0, incidentCount = 0, wsStatus = 'c
   return (
     <div style={{
       height: '64px',
-      backgroundColor: '#0d1117',
-      borderBottom: '1px solid #1a2433',
+      backgroundColor: '#161F30',
+      borderBottom: '1px solid #26354A',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'space-between',
@@ -41,8 +41,8 @@ export default function TopBar({ loopCount = 0, incidentCount = 0, wsStatus = 'c
                 style={{
                   backgroundColor: 'transparent',
                   border: 'none',
-                  borderBottom: isActive ? '2px solid #00f0ff' : '2px solid transparent',
-                  color: isActive ? '#00f0ff' : '#8a9ba8',
+                  borderBottom: isActive ? '2px solid #FFB000' : '2px solid transparent',
+                  color: isActive ? '#FFB000' : '#8a9ba8',
                   cursor: 'pointer',
                   fontFamily: "'JetBrains Mono', monospace",
                   fontSize: '13px',
@@ -70,9 +70,9 @@ export default function TopBar({ loopCount = 0, incidentCount = 0, wsStatus = 'c
             placeholder="Search or Enter Command" 
             className="palantir-mono"
             style={{
-              backgroundColor: '#080a0d',
-              border: '1px solid #1a2433',
-              borderRadius: '2px',
+              backgroundColor: '#0A0E17',
+              border: '1px solid #26354A',
+              borderRadius: '0px',
               color: '#f8fafc',
               padding: '6px 12px 6px 28px',
               fontSize: '11px',
@@ -80,8 +80,8 @@ export default function TopBar({ loopCount = 0, incidentCount = 0, wsStatus = 'c
               outline: 'none',
               transition: 'border-color 0.2s'
             }}
-            onFocus={(e) => e.target.style.borderColor = '#00f0ff'}
-            onBlur={(e) => e.target.style.borderColor = '#1a2433'}
+            onFocus={(e) => e.target.style.borderColor = '#FFB000'}
+            onBlur={(e) => e.target.style.borderColor = '#26354A'}
           />
           <svg 
             style={{ position: 'absolute', left: '8px', width: '12px', height: '12px', color: '#5c7080' }} 
@@ -95,16 +95,16 @@ export default function TopBar({ loopCount = 0, incidentCount = 0, wsStatus = 'c
         <div style={{
           display: 'flex',
           alignItems: 'center',
-          backgroundColor: '#080a0d',
-          border: '1px solid #1a2433',
-          borderRadius: '2px',
+          backgroundColor: '#0A0E17',
+          border: '1px solid #26354A',
+          borderRadius: '0px',
           padding: '6px 14px',
           gap: '16px'
         }}>
           {/* LIVE/OFFLINE status */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <span 
-              className={`${isConnected ? "pulse-dot-cyan" : ""} ${liveFlash ? "flash-active-trigger" : ""}`} 
+              className={`${isConnected ? "pulse-dot-amber" : ""} ${liveFlash ? "flash-active-trigger" : ""}`}
               style={{
                 display: 'inline-block',
                 width: '6px',
@@ -123,15 +123,15 @@ export default function TopBar({ loopCount = 0, incidentCount = 0, wsStatus = 'c
             </span>
           </div>
           
-          <div style={{ width: '1px', height: '14px', backgroundColor: '#1a2433' }}></div>
+          <div style={{ width: '1px', height: '14px', backgroundColor: '#26354A' }}></div>
 
           {/* LOOP COUNT */}
           <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px' }}>
             <span className="palantir-mono" style={{ fontSize: '10px', fontWeight: 600, color: '#5c7080', letterSpacing: '0.5px' }}>Cycles:</span>
-            <span className="palantir-mono" style={{ fontSize: '13px', fontWeight: 700, color: '#00f0ff' }}>[{loopCount < 10 ? '0' + loopCount : loopCount}]</span>
+            <span className="palantir-mono" style={{ fontSize: '13px', fontWeight: 700, color: '#FFB000' }}>[{loopCount < 10 ? '0' + loopCount : loopCount}]</span>
           </div>
 
-          <div style={{ width: '1px', height: '14px', backgroundColor: '#1a2433' }}></div>
+          <div style={{ width: '1px', height: '14px', backgroundColor: '#26354A' }}></div>
 
           {/* INCIDENTS count */}
           <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px' }}>
@@ -139,7 +139,7 @@ export default function TopBar({ loopCount = 0, incidentCount = 0, wsStatus = 'c
             <span className="palantir-mono" style={{ fontSize: '13px', fontWeight: 700, color: '#ff3366' }}>[{incidentCount < 10 ? '0' + incidentCount : incidentCount}]</span>
           </div>
 
-          <div style={{ width: '1px', height: '14px', backgroundColor: '#1a2433' }}></div>
+          <div style={{ width: '1px', height: '14px', backgroundColor: '#26354A' }}></div>
 
           {/* Next agent cycle countdown */}
           <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px' }}>
@@ -167,7 +167,7 @@ export default function TopBar({ loopCount = 0, incidentCount = 0, wsStatus = 'c
               alignItems: 'center',
               justifyContent: 'center',
               transition: 'color 0.2s'
-            }} onMouseEnter={(e) => e.currentTarget.style.color = '#00f0ff'} onMouseLeave={(e) => e.currentTarget.style.color = '#8a9ba8'}>
+            }} onMouseEnter={(e) => e.currentTarget.style.color = '#FFB000'} onMouseLeave={(e) => e.currentTarget.style.color = '#8a9ba8'}>
             <Bell size={18} />
           </button>
           {incidentCount > 0 && (
@@ -196,7 +196,7 @@ export default function TopBar({ loopCount = 0, incidentCount = 0, wsStatus = 'c
             alignItems: 'center',
             justifyContent: 'center',
             transition: 'color 0.2s'
-          }} onMouseEnter={(e) => e.currentTarget.style.color = '#00f0ff'} onMouseLeave={(e) => e.currentTarget.style.color = '#8a9ba8'}>
+          }} onMouseEnter={(e) => e.currentTarget.style.color = '#FFB000'} onMouseLeave={(e) => e.currentTarget.style.color = '#8a9ba8'}>
           <Settings size={18} />
         </button>
 
@@ -206,9 +206,9 @@ export default function TopBar({ loopCount = 0, incidentCount = 0, wsStatus = 'c
           style={{
             width: '28px',
             height: '28px',
-            borderRadius: '2px',
+            borderRadius: '0px',
             overflow: 'hidden',
-            border: '1px solid #1a2433',
+            border: '1px solid #26354A',
             cursor: 'pointer'
           }}>
           <img 

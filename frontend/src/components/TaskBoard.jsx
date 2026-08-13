@@ -53,7 +53,7 @@ export default function TaskBoard({ tasks = [], onResolve, fullScreen = false })
       bg = 'rgba(0, 230, 118, 0.08)';
       text = 'Resolved';
     } else if (urgency.toLowerCase() === 'low') {
-      color = '#00f0ff'; // Blue
+      color = '#FFB000'; // Blue
       bg = 'rgba(0, 240, 255, 0.08)';
       text = 'Low';
     } else if (urgency.toLowerCase() === 'high') {
@@ -74,7 +74,7 @@ export default function TaskBoard({ tasks = [], onResolve, fullScreen = false })
         backgroundColor: bg,
         padding: '2px 6px',
         border: `1px solid ${color}`,
-        borderRadius: '2px',
+        borderRadius: '0px',
         letterSpacing: '1px'
       }}>
         {text}
@@ -90,7 +90,7 @@ export default function TaskBoard({ tasks = [], onResolve, fullScreen = false })
         flexDirection: 'column',
         gap: '12px',
         padding: '16px',
-        borderRight: '1px solid #1a2433'
+        borderRight: '1px solid #26354A'
       }}>
         <h3 className="palantir-mono" style={{
           fontSize: '10px',
@@ -115,9 +115,9 @@ export default function TaskBoard({ tasks = [], onResolve, fullScreen = false })
               <div
                 key={task.id || task._id}
                 style={{
-                  backgroundColor: '#121820',
-                  border: '1px solid #1a2433',
-                  borderRadius: '2px',
+                  backgroundColor: '#161F30',
+                  border: '1px solid #26354A',
+                  borderRadius: '0px',
                   padding: '16px',
                   position: 'relative',
                   display: 'flex',
@@ -127,11 +127,11 @@ export default function TaskBoard({ tasks = [], onResolve, fullScreen = false })
                 }}
                 onMouseEnter={(e) => {
                   e.currentTarget.style.backgroundColor = '#17202b';
-                  e.currentTarget.style.borderColor = '#00f0ff';
+                  e.currentTarget.style.borderColor = '#FFB000';
                 }}
                 onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = '#121820';
-                  e.currentTarget.style.borderColor = '#1a2433';
+                  e.currentTarget.style.backgroundColor = '#161F30';
+                  e.currentTarget.style.borderColor = '#26354A';
                 }}
               >
                 {/* Badge & dots */}
@@ -194,12 +194,12 @@ export default function TaskBoard({ tasks = [], onResolve, fullScreen = false })
                       style={{
                         flex: 1,
                         backgroundColor: '#1c2430',
-                        border: '1px solid #1a2433',
+                        border: '1px solid #26354A',
                         color: '#e2e8f0',
                         fontSize: '10px',
                         padding: '6px 0',
                         cursor: 'pointer',
-                        borderRadius: '2px',
+                        borderRadius: '0px',
                         fontWeight: 600
                       }}
                     >
@@ -210,12 +210,12 @@ export default function TaskBoard({ tasks = [], onResolve, fullScreen = false })
                       style={{
                         flex: 1,
                         backgroundColor: '#1c2430',
-                        border: '1px solid #1a2433',
+                        border: '1px solid #26354A',
                         color: '#e2e8f0',
                         fontSize: '10px',
                         padding: '6px 0',
                         cursor: 'pointer',
-                        borderRadius: '2px',
+                        borderRadius: '0px',
                         fontWeight: 600
                       }}
                     >
@@ -234,7 +234,7 @@ export default function TaskBoard({ tasks = [], onResolve, fullScreen = false })
                         color: '#00e676',
                         fontSize: '10px',
                         padding: '6px 0',
-                        borderRadius: '2px',
+                        borderRadius: '0px',
                         fontWeight: 600,
                         textAlign: 'center'
                       }}
@@ -255,8 +255,8 @@ export default function TaskBoard({ tasks = [], onResolve, fullScreen = false })
     <div style={{
       height: fullScreen ? '100%' : '250px',
       flex: fullScreen ? 1 : 'none',
-      backgroundColor: '#0d1117',
-      borderTop: '1px solid #1a2433',
+      backgroundColor: '#161F30',
+      borderTop: '1px solid #26354A',
       display: 'flex',
       flexDirection: 'column',
       flexShrink: fullScreen ? 1 : 0
@@ -264,7 +264,7 @@ export default function TaskBoard({ tasks = [], onResolve, fullScreen = false })
       {/* Legend & Header */}
       <div style={{
         padding: '12px 24px',
-        borderBottom: '1px solid #1a2433',
+        borderBottom: '1px solid #26354A',
         display: 'flex',
         justifyContent: 'space-between',
         alignItems: 'center'

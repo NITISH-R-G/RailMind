@@ -24,8 +24,10 @@ const ANIMATION_CSS = `
   /* Smooth marker glide — Leaflet sets position via CSS transform; this animates it */
   .train-position-marker {
     transition: transform 4.8s linear !important;
+    will-change: transform;
   }
   .shockwave-ring {
+    will-change: transform, opacity;
     width: 32px;
     height: 32px;
     border-radius: 50%;
@@ -41,13 +43,13 @@ const ANIMATION_CSS = `
     border-color: #ffb300;
   }
   .leaflet-popup-content-wrapper {
-    background: #121820 !important;
-    border: 1px solid #1a2433 !important;
+    background: #161F30 !important;
+    border: 1px solid #26354A !important;
     border-radius: 0 !important;
     box-shadow: 0 0 20px rgba(0,240,255,0.15) !important;
     padding: 0 !important;
   }
-  .leaflet-popup-tip { background: #121820 !important; }
+  .leaflet-popup-tip { background: #161F30 !important; }
   .leaflet-popup-content { margin: 0 !important; }
 `;
 
@@ -159,21 +161,17 @@ const getDetourCoords = (planText) => {
   return coords.length >= 2 ? coords : null;
 };
 
-const createMarkerIcon = (status, delay, isSelected = false) => {
-  let color = '#00f0ff';
+const createMarkerIcon = (status, delay, isSelected = false, rotation = 0) => {
+  let color = '#FFB000';
   if (status === 'cancelled' || delay > 60) color = '#ff3366';
   else if (status === 'delayed' || delay > 15) color = '#ffb300';
   const size = isSelected ? 16 : 10;
   const glow = isSelected ? `0 0 14px ${color}, 0 0 28px ${color}40` : `0 0 8px ${color}80`;
   return L.divIcon({
-    html: `<div style="
-      width:${size}px; height:${size}px;
-      background:${color};
-      border: 2px solid #fff;
-      border-radius: 50%;
-      box-shadow: ${glow};
-      transition: all 0.4s ease;
-    "></div>`,
+    html: `<div style="width:${size}px; height:${size}px; display:flex; justify-content:center; align-items:center;">
+<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="${color}" style="transform: rotate(${rotation}deg); filter: drop-shadow(0 0 6px ${color}); transition: transform 0.4s ease;">
+  <path d="M12 2L2 22L12 18L22 22L12 2Z" stroke="#fff" stroke-width="1.5" stroke-linejoin="round"/>
+</svg></div>`,
     className: 'train-position-marker',
     iconSize: [size, size],
     iconAnchor: [size / 2, size / 2],
@@ -191,7 +189,7 @@ const createShockwaveIcon = (severity) => {
 };
 
 // ─── Component: Animated Polyline (flowing dashes) ───────────────────────────
-function AnimatedPolyline({ positions, color = '#00f0ff', weight = 3, isDashed = false }) {
+function AnimatedPolyline({ positions, color = '#FFB000', weight = 3, isDashed = false }) {
   const map = useMap();
   const polylineRef = useRef(null);
 
@@ -227,7 +225,7 @@ function ToastOverlay({ toasts }) {
     }}>
       {toasts.map(t => (
         <div key={t.id} style={{
-          backgroundColor: '#0d1117',
+          backgroundColor: '#161F30',
           border: `1px solid ${t.color}`,
           boxShadow: `0 0 12px ${t.color}40`,
           padding: '10px 14px',
@@ -289,7 +287,7 @@ export default function LiveMap({ trains = [], incidents = [] }) {
       const prev = prevStationsRef.current[train.train_number];
       const curr = train.current_station || train.station_code;
       if (prev && prev !== curr && curr) {
-        const color = train.delay_minutes > 15 ? '#ffb300' : '#00f0ff';
+        const color = train.delay_minutes > 15 ? '#ffb300' : '#FFB000';
         const delayStr = train.delay_minutes > 0 ? ` — ${train.delay_minutes}m delay` : ' — On Time';
         addToast(
           `${train.train_number}-${Date.now()}`,
@@ -344,7 +342,9 @@ export default function LiveMap({ trains = [], incidents = [] }) {
   }, [trains]);
 
   const activeTrains = trains.length > 0 ? trains : [
-    { train_number: "12301", train_name: "Howrah Rajdhani", current_station: "New Delhi", delay_minutes: 0, status: "On Time", lat: 28.6419, lng: 77.2194, speed: "120 km/h", next_station: "Kanpur Central", distance_next: "440 KM" },
+    { train_number: "12301", train_name: "Howrah Duronto", current_station: "New Delhi", delay_minutes: 0, status: "On Time", lat: 28.6419, lng: 77.2194, speed: "120 km/h", next_station: "Kanpur Central", distance_next: "440 KM" },
+    { train_number: "12302", train_name: "Mumbai Rajdhani", current_station: "Surat", delay_minutes: 10, status: "Delayed", lat: 21.1702, lng: 72.8311, speed: "110 km/h", next_station: "Vadodara", distance_next: "130 KM" },
+    { train_number: "12303", train_name: "Chennai Exp", current_station: "Nagpur", delay_minutes: 0, status: "On Time", lat: 21.1458, lng: 79.0882, speed: "95 km/h", next_station: "Hyderabad", distance_next: "500 KM" }
   ];
 
   const selectedTrain = activeTrains.find(t => t.train_number === selectedTrainNo);
@@ -356,7 +356,7 @@ export default function LiveMap({ trains = [], incidents = [] }) {
   const detourCoords = approvedIncident ? getDetourCoords(approvedIncident.reroute_plan) : null;
 
   return (
-    <div style={{ flex: 1, height: '100%', position: 'relative', backgroundColor: '#080a0d' }}>
+    <div style={{ flex: 1, height: '100%', position: 'relative', backgroundColor: '#0A0E17' }}>
       <ToastOverlay toasts={toasts} />
       <LiveClockBadge />
 
@@ -370,7 +370,7 @@ export default function LiveMap({ trains = [], incidents = [] }) {
         {/* Feature A: Comet Trail Dots */}
         {Object.entries(trailDots).map(([trainNo, dots]) => {
           const train = activeTrains.find(t => t.train_number === trainNo);
-          const color = train?.delay_minutes > 60 ? '#ff3366' : train?.delay_minutes > 15 ? '#ffb300' : '#00f0ff';
+          const color = train?.delay_minutes > 60 ? '#ff3366' : train?.delay_minutes > 15 ? '#ffb300' : '#FFB000';
           return dots.slice(0, -1).map((dot, i) => {
             const opacity = (i + 1) / dots.length * 0.45;
             const radius  = 2 + i * 0.6;
@@ -396,13 +396,13 @@ export default function LiveMap({ trains = [], incidents = [] }) {
             {detourCoords ? (
               <>
                 {originalCoords.length > 1 && (
-                  <Polyline positions={originalCoords} pathOptions={{ color: '#2a3a4a', weight: 2, dashArray: '4, 6', opacity: 0.5 }} />
+                  <Polyline positions={originalCoords} pathOptions={{ color: '#26354A', weight: 2, dashArray: '4, 6', opacity: 0.8 }} />
                 )}
                 <AnimatedPolyline positions={detourCoords} color="#ff3366" weight={4} isDashed={true} />
               </>
             ) : (
               originalCoords.length > 1 && (
-                <AnimatedPolyline positions={originalCoords} color="#00f0ff" weight={3} />
+                <AnimatedPolyline positions={originalCoords} color="#FFB000" weight={3} />
               )
             )}
           </>
@@ -423,7 +423,7 @@ export default function LiveMap({ trains = [], incidents = [] }) {
           const isCritical = delay > 60 || train.status?.toLowerCase() === 'cancelled';
           const isDelayed = delay > 15;
           const statusText = isCritical ? 'CRITICAL' : isDelayed ? 'DELAYED' : 'ON TIME';
-          const statusColor = isCritical ? '#ff3366' : isDelayed ? '#ffb300' : '#00f0ff';
+          const statusColor = isCritical ? '#ff3366' : isDelayed ? '#ffb300' : '#FFB000';
           const hasApprovedDetour = (incidents || []).some(
             inc => inc.train_number === train.train_number && inc.approved && inc.reroute_plan
           );
@@ -432,14 +432,14 @@ export default function LiveMap({ trains = [], incidents = [] }) {
             <Marker
               key={train.train_number || idx}
               position={position}
-              icon={createMarkerIcon(train.status?.toLowerCase(), delay, isSelected)}
+              icon={createMarkerIcon(train.status?.toLowerCase(), delay, isSelected, train.heading || 45)}
               eventHandlers={{ click: () => setSelectedTrainNo(prev => prev === train.train_number ? null : train.train_number) }}
               zIndexOffset={isSelected ? 1000 : 0}
             >
               <Popup closeButton={false} minWidth={250}>
                 <div style={{
                   padding: '14px 16px',
-                  backgroundColor: '#121820',
+                  backgroundColor: '#161F30',
                   color: '#e2e8f0',
                   fontFamily: "'JetBrains Mono', monospace",
                 }}>
@@ -475,13 +475,13 @@ export default function LiveMap({ trains = [], incidents = [] }) {
                     </div>
                   )}
 
-                  <div style={{ height: '1px', backgroundColor: '#1a2433', margin: '8px 0' }} />
+                  <div style={{ height: '1px', backgroundColor: '#26354A', margin: '8px 0' }} />
 
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px' }}>
                     <span style={{ color: '#5c7080' }}>
                       NEXT: <strong style={{ color: '#e2e8f0' }}>{train.next_station || '—'}</strong>
                     </span>
-                    <span style={{ color: '#00f0ff' }}>{train.distance_next || '—'}</span>
+                    <span style={{ color: '#FFB000' }}>{train.distance_next || '—'}</span>
                   </div>
 
                   <div style={{ marginTop: '8px', fontSize: '9px', color: '#3a4a5a', textAlign: 'center' }}>
@@ -516,11 +516,11 @@ function LiveClockBadge() {
       position: 'absolute', top: '12px', right: '12px',
       zIndex: 1000,
       backgroundColor: 'rgba(8,10,13,0.85)',
-      border: '1px solid #1a2433',
+      border: '1px solid #26354A',
       padding: '6px 12px',
       fontFamily: "'JetBrains Mono', monospace",
       fontSize: '11px',
-      color: '#00f0ff',
+      color: '#FFB000',
       letterSpacing: '0.5px',
       backdropFilter: 'blur(6px)',
     }}>
