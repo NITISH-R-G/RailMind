@@ -16,7 +16,7 @@ class CircuitBreaker:
         self.last_failure_time = time.time()
         if self.failures >= self.failure_threshold:
             self.state = "OPEN"
-            logger.warning(f"Circuit breaker tripped. State is now OPEN.")
+            logger.warning("Circuit breaker tripped. State is now OPEN.")
 
     def record_success(self):
         self.failures = 0

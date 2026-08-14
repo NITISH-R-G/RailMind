@@ -601,7 +601,7 @@ def generate_mock_json_fallback(prompt: str, state: AgentState) -> dict:
             "confidence": 0.94
         }
 
-async def call_gemini(prompt: str, state: AgentState = None) -> dict:
+async def call_gemini(prompt: str, state: dict = None) -> dict:
     if not llm_circuit_breaker.can_execute():
         logger.warning("LLM Circuit Breaker is OPEN. Shifting to local LLM via Ollama.")
         import httpx
