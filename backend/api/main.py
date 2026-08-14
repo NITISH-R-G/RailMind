@@ -56,6 +56,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+import time
+import uuid
+from fastapi import Request
+
 # Initialize railways client for fallback train list queries
 api_key = os.getenv("RAILWAYS_API_KEY", "mock_key")
 railways_client = RailwaysAPIClient(api_key=api_key)
@@ -78,73 +82,13 @@ latest_agent_state = {
 }
 
 
-async def run_agent_loop_fallback():
-    from ..agents.graph import railmind_graph
-    from ..agents.state import AgentState
-    import uuid
-    train_numbers = [
-        "12301", "12951", "12001", "12259", "12565",
-        "11057", "12627", "12625", "12621", "12615",
-        "12309", "12721", "12229", "12311", "12641"
-    ]
-    processed_trains = []
-    
-    # Wait a few seconds for startup to settle
-    await asyncio.sleep(5)
-    
-    while True:
-        try:
-            print("[RAILMIND] Local background agent loop run starting...")
-            initial_state = AgentState(
-                raw_train_data=[],
-                anomalies=[],
-                claude_reasoning="",
-                reroute_plan=None,
-                department_tasks=[],
-                sms_alerts_sent=[],
-                incident_report=None,
-                loop_count=0,
-                should_continue=False,
-                last_api_call="Never",
-                railways_latency_ms=0,
-                ai_latency_ms=0,
-                processed_trains=processed_trains,
-                target_trains=train_numbers
-            )
-            thread_id = f"local_bg_{uuid.uuid4().hex[:8]}"
-            config = {"configurable": {"thread_id": thread_id}, "recursion_limit": 20}
-            result = await railmind_graph.ainvoke(initial_state, config)
-            if result:
-                processed_trains = result.get("processed_trains", [])
-                latest_agent_state.update({
-                    "raw_train_data": result.get("raw_train_data", []),
-                    "anomalies": result.get("anomalies", []),
-                    "claude_reasoning": result.get("claude_reasoning", ""),
-                    "reroute_plan": result.get("reroute_plan"),
-                    "department_tasks": result.get("department_tasks", []),
-                    "sms_alerts_sent": result.get("sms_alerts_sent", []),
-                    "incident_report": result.get("incident_report"),
-                    "loop_count": result.get("loop_count", 0),
-                    "should_continue": result.get("should_continue", False),
-                    "last_api_call": result.get("last_api_call", "Never"),
-                    "railways_latency_ms": result.get("railways_latency_ms", 0),
-                    "ai_latency_ms": result.get("ai_latency_ms", 0),
-                    "processed_trains": processed_trains
-                })
-            print("[RAILMIND] Local background agent loop run completed.")
-        except Exception as e:
-            print(f"[RAILMIND] Local background agent loop failed: {e}")
-        await asyncio.sleep(60)
-
 @app.on_event("startup")
 async def startup_event():
-    # Test connection on startup and clean collections:
     try:
         from ..services.db_client import client, db
         await client.admin.command('ping')
         print("[RAILMIND] MongoDB Atlas connected [OK]")
         
-        # Cleanup incidents and tasks
         await db_client.init_indexes()
         await db.incidents.delete_many({})
         await db.department_tasks.delete_many({})
@@ -152,11 +96,77 @@ async def startup_event():
     except Exception as e:
         print(f"[RAILMIND] MongoDB connection/cleanup failed: {e}")
 
-    # Run the agent workflow loop asynchronously in the background on API startup
-    asyncio.create_task(run_agent_loop_fallback())
+    # Initialize ARQ Redis pool once during FastAPI startup
+    try:
+        from arq import create_pool
+        from arq.connections import RedisSettings
+        redis_host = os.getenv("REDIS_HOST", "localhost")
+        redis_port = int(os.getenv("REDIS_PORT", 6379))
+        app.state.redis_pool = await create_pool(RedisSettings(host=redis_host, port=redis_port))
+        print("[RAILMIND] ARQ Redis pool initialized [OK]")
+    except Exception as e:
+        print(f"[RAILMIND] ARQ Redis pool initialization failed: {e}")
+
+# Global Redis Client for Fast Rate Limiting
+global_redis_client = None
+
+@app.on_event("startup")
+async def startup_redis_client():
+    global global_redis_client
+    import redis.asyncio as redis
+    redis_url = os.getenv("REDIS_URL", "redis://localhost:6379")
+    try:
+        global_redis_client = redis.from_url(redis_url, decode_responses=True)
+    except Exception as e:
+        print(f"[RAILMIND] Global Redis client init failed: {e}")
+
+# Rate Limiting Logic via Redis ZSET
+async def check_rate_limit(redis_conn, key="telemetry_rate_limit", limit=50, window=1.0):
+    if not redis_conn:
+        return True
+    now = time.time()
+    # First get the count, then add only if allowed
+    async with redis_conn.pipeline(transaction=True) as pipe:
+        pipe.zremrangebyscore(key, 0, now - window)
+        pipe.zcard(key)
+        results = await pipe.execute()
+
+    count = results[1]
+    if count >= limit:
+        return False
+
+    async with redis_conn.pipeline(transaction=True) as pipe:
+        pipe.zadd(key, {str(uuid.uuid4()): now})
+        pipe.expire(key, int(window) + 1)
+        await pipe.execute()
+    return True
 
 # Include general REST routers
 app.include_router(router, prefix="/api")
+
+@app.post("/api/telemetry/ingest")
+async def ingest_telemetry(request: Request, data: dict):
+    # Enforce rate limits to safely handle upstream provider throttles
+    try:
+        allowed = await check_rate_limit(global_redis_client, key="telemetry_ingest_throttle", limit=20, window=1.0)
+        if not allowed:
+            raise HTTPException(status_code=429, detail="Rate limit exceeded. Slow down.")
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Rate limiting failed: {e}")
+
+    raw_data = data.get("raw_train_data", [])
+    if not raw_data:
+        raise HTTPException(status_code=400, detail="Missing raw_train_data field in payload")
+
+    if hasattr(app.state, "redis_pool"):
+        await app.state.redis_pool.enqueue_job("process_train_telemetry", raw_data)
+    else:
+        # Fallback if ARQ is missing
+        pass
+
+    return {"status": "enqueued", "count": len(raw_data)}
 
 # Mounting direct WebSocket handler
 @app.websocket("/ws")
