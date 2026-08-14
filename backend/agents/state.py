@@ -13,14 +13,22 @@ def append_to_list(a: Optional[List], b: Optional[List]) -> List:
 
     return a + b
 
-class TrainAnomaly(TypedDict):
-    train_number: str
-    train_name: str
-    anomaly_type: str  # "delay", "overcrowding", "track_fault", "cancellation"
-    severity: str      # "low", "medium", "high", "critical"
-    location: str
+class TrainAnomaly(TypedDict, total=False):
+    train_number: Optional[str]
+    train_name: Optional[str]
+    anomaly_type: Optional[str]  # "delay", "overcrowding", "track_fault", "cancellation"
+    severity: Optional[str]      # "low", "medium", "high", "critical"
+    location: Optional[str]
     delay_minutes: Optional[int]
     passenger_load: Optional[str]
+    lat: Optional[float]
+    lng: Optional[float]
+    current_station: Optional[str]
+    destination: Optional[str]
+    source: Optional[str]
+    status: Optional[str]
+    station_code: Optional[str]
+    reason: Optional[str]
 
 class DepartmentTask(TypedDict):
     department: str    # "maintenance", "operations", "station_manager"
@@ -28,27 +36,27 @@ class DepartmentTask(TypedDict):
     urgency: str
     action_required: str
 
-class AgentState(TypedDict):
-    raw_train_data: List[dict]
+class AgentState(TypedDict, total=False):
+    raw_train_data: Optional[List[dict]]
     anomalies: Annotated[List[TrainAnomaly], append_to_list]
-    claude_reasoning: str
+    claude_reasoning: Optional[str]
     reroute_plan: Optional[str]
     department_tasks: Annotated[List[DepartmentTask], operator.add]
     sms_alerts_sent: Annotated[List[str], append_to_list]
     incident_report: Optional[str]
-    loop_count: int
-    should_continue: bool
-    last_api_call: str
-    railways_latency_ms: int
-    ai_latency_ms: int
-    processed_trains: List[str]
-    target_trains: List[str]
+    loop_count: Optional[int]
+    should_continue: Optional[bool]
+    last_api_call: Optional[str]
+    railways_latency_ms: Optional[int]
+    ai_latency_ms: Optional[int]
+    processed_trains: Optional[List[str]]
+    target_trains: Optional[List[str]]
     errors: Annotated[List[str], append_to_list]
-    next_node: str
-    last_node_executed: str
+    next_node: Optional[str]
+    last_node_executed: Optional[str]
     messages: Annotated[list, operator.add]
     tools_used: Annotated[List[str], append_to_list]
-    detour_route: List[str]
+    detour_route: Optional[List[str]]
     perception: Optional[dict]
     decision: Optional[dict]
     incident_history: Optional[List[dict]]
