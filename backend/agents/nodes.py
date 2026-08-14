@@ -13,18 +13,37 @@ from ..services.railways_api import get_live_train_status, get_cancelled_trains,
 from ..services.twilio_service import TwilioSMSClient
 from ..api.websocket import websocket_manager
 
+from logging.handlers import RotatingFileHandler
+from prometheus_client import Counter, Histogram
+
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+os.makedirs(os.path.join(os.path.dirname(os.path.dirname(__file__)), 'logs'), exist_ok=True)
+handler = RotatingFileHandler(os.path.join(os.path.dirname(os.path.dirname(__file__)), 'logs', 'agent.log'), maxBytes=10485760, backupCount=5)
+handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+logger.addHandler(handler)
+
+from ..config import settings
+from ..circuit_breaker import CircuitBreaker
+
+# Prometheus Metrics
+agent_tokens_consumed = Counter('agent_tokens_consumed_total', 'Total number of tokens consumed by the AI agent')
+node_execution_latency = Histogram('agent_node_execution_latency_seconds', 'Latency of individual agent nodes', ['node_name'])
+agent_errors = Counter('agent_errors_total', 'Total number of errors in the agent loop', ['node_name'])
+twilio_sms_status = Counter('twilio_sms_status_total', 'Status of Twilio SMS API responses', ['status'])
 
 # Ensure env variables are loaded before configuration
-env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
-load_dotenv(dotenv_path=env_path)
-api_key = os.getenv("RAILWAYS_API_KEY", "mock_key")
+api_key = settings.RAILWAYS_API_KEY
 railways_client = RailwaysAPIClient(api_key=api_key)
 
-twilio_sid = os.getenv("TWILIO_ACCOUNT_SID", "mock_sid")
-twilio_token = os.getenv("TWILIO_AUTH_TOKEN", "mock_token")
-twilio_from = os.getenv("TWILIO_PHONE_NUMBER", "+1234567890")
+twilio_sid = settings.TWILIO_ACCOUNT_SID
+twilio_token = settings.TWILIO_AUTH_TOKEN
+twilio_from = settings.TWILIO_PHONE_NUMBER
 twilio_client = TwilioSMSClient(account_sid=twilio_sid, auth_token=twilio_token, from_number=twilio_from)
+
+# Circuit breakers
+llm_circuit_breaker = CircuitBreaker(failure_threshold=3, recovery_timeout=30)
+twilio_circuit_breaker = CircuitBreaker(failure_threshold=3, recovery_timeout=60)
 
 # Shared log assistant that prints logs and broadcasts AGENT_LOG & AGENT_STATE_CHANGE WebSocket events
 async def log_agent(node_name: str, message: str):
@@ -57,6 +76,8 @@ async def log_agent(node_name: str, message: str):
         logger.error(f"Failed to broadcast AGENT_LOG / AGENT_STATE_CHANGE message: {e}")
 
 async def evaluate_previous_action(state: AgentState) -> AgentState:
+    import time
+    start_time = time.time()
     try:
         await log_agent("evaluate_previous_action", "[RAILMIND] Checking and evaluating previous self-healing actions...")
         
@@ -148,11 +169,16 @@ async def evaluate_previous_action(state: AgentState) -> AgentState:
                             "reason": "Previous reroute ineffective"
                         })
     except Exception as e:
+        agent_errors.labels(node_name='evaluate_previous_action').inc()
         logger.error(f"Error in evaluate_previous_action: {e}")
         await log_agent("evaluate_previous_action", f"[RAILMIND] [ERROR] Self-healing evaluation failed: {e}")
+    finally:
+        node_execution_latency.labels(node_name='evaluate_previous_action').observe(time.time() - start_time)
     return state
 
 async def ingest_node(state: AgentState) -> AgentState:
+    import time
+    start_time_total = time.time()
     try:
         await log_agent("SCANNING", "Polling 15 trains on Indian Railways...")
         # If evaluate_previous_action already populated the raw train data, reuse it
@@ -231,11 +257,16 @@ async def ingest_node(state: AgentState) -> AgentState:
         state["raw_train_data"] = live_trains
         await log_agent("ingest_node", f"[RAILMIND] Ingested {len(live_trains)} trains")
     except Exception as e:
+        agent_errors.labels(node_name='ingest_node').inc()
         logger.error(f"Error in ingest_node: {e}")
         await log_agent("ingest_node", f"[RAILMIND] [ERROR] Ingest node failed: {e}")
+    finally:
+        node_execution_latency.labels(node_name='ingest_node').observe(time.time() - start_time_total)
     return state
 
 async def detect_node(state: AgentState) -> AgentState:
+    import time
+    start_time = time.time()
     try:
         await log_agent("detect_node", "[RAILMIND] Running real-time anomaly detection rules...")
         anomalies: List[TrainAnomaly] = []
@@ -364,8 +395,11 @@ async def detect_node(state: AgentState) -> AgentState:
             await log_agent("detect_node", "[RAILMIND] [OK] All trains nominal")
             state["should_continue"] = False
     except Exception as e:
+        agent_errors.labels(node_name='detect_node').inc()
         logger.error(f"Error in detect_node: {e}")
         await log_agent("detect_node", f"[RAILMIND] [ERROR] Detect node failed: {e}")
+    finally:
+        node_execution_latency.labels(node_name='detect_node').observe(time.time() - start_time)
     return state
 
 def get_station_code_from_name(station_name: str) -> str:
@@ -567,54 +601,95 @@ def generate_mock_json_fallback(prompt: str, state: AgentState) -> dict:
             "confidence": 0.94
         }
 
+def extract_json_from_text(response_text: str) -> dict:
+    clean_text = response_text.strip()
+    if clean_text.startswith("```json"):
+        clean_text = clean_text[7:]
+    if clean_text.endswith("```"):
+        clean_text = clean_text[:-3]
+    clean_text = clean_text.strip()
+    return json.loads(clean_text)
+
+async def call_ollama_fallback(prompt: str) -> str:
+    import httpx
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        response = await client.post(
+            settings.OLLAMA_BASE_URL,
+            json={
+                "model": settings.OLLAMA_MODEL,
+                "prompt": prompt + "\n\nRespond ONLY with a valid JSON block matching the requested format.",
+                "stream": False,
+                "format": "json"
+            }
+        )
+        response.raise_for_status()
+        response_data = response.json()
+        return response_data.get("response", "")
+
+async def call_gemini_api(prompt: str, gemini_key: str) -> str:
+    import google.generativeai as genai
+    genai.configure(api_key=gemini_key)
+    model = genai.GenerativeModel("gemini-2.0-flash")
+    response = await model.generate_content_async(
+        prompt,
+        generation_config={"response_mime_type": "application/json"}
+    )
+    response_text = response.text
+    agent_tokens_consumed.inc(model.count_tokens(prompt).total_tokens + model.count_tokens(response_text).total_tokens)
+    return response_text
+
+async def call_claude_api(prompt: str, anthropic_key: str) -> str:
+    from anthropic import AsyncAnthropic
+    client = AsyncAnthropic(api_key=anthropic_key)
+    response = await client.messages.create(
+        model="claude-3-5-sonnet-20241022",
+        max_tokens=1000,
+        system="You must respond ONLY with a valid JSON block matching the requested format.",
+        messages=[{"role": "user", "content": prompt}]
+    )
+    response_text = response.content[0].text
+    agent_tokens_consumed.inc(response.usage.input_tokens + response.usage.output_tokens)
+    return response_text
+
 async def call_gemini(prompt: str, state: AgentState = None) -> dict:
-    gemini_key = os.getenv("GEMINI_API_KEY")
-    anthropic_key = os.getenv("ANTHROPIC_API_KEY")
+    if not llm_circuit_breaker.can_execute():
+        logger.warning("LLM Circuit Breaker is OPEN. Shifting to local LLM via Ollama.")
+        try:
+            response_text = await call_ollama_fallback(prompt)
+            if response_text:
+                return extract_json_from_text(response_text)
+        except Exception as e:
+            logger.warning(f"Local LLM fallback failed: {e}. Using mock fallback.")
+        return generate_mock_json_fallback(prompt, state)
+
+    gemini_key = settings.GEMINI_API_KEY
+    anthropic_key = settings.ANTHROPIC_API_KEY
     
     response_text = None
     
-    # Try Gemini 2.0 Flash first
     if gemini_key and gemini_key != "mock_key":
         try:
-            import google.generativeai as genai
-            genai.configure(api_key=gemini_key)
-            model = genai.GenerativeModel("gemini-2.0-flash")
-            response = await model.generate_content_async(
-                prompt,
-                generation_config={"response_mime_type": "application/json"}
-            )
-            response_text = response.text
+            response_text = await call_gemini_api(prompt, gemini_key)
+            llm_circuit_breaker.record_success()
         except Exception as e:
             logger.warning(f"Gemini API call failed: {e}. Trying fallback.")
             
-    # Try Claude fallback if Gemini failed
     if not response_text and anthropic_key and anthropic_key != "mock_key":
         try:
-            from anthropic import AsyncAnthropic
-            client = AsyncAnthropic(api_key=anthropic_key)
-            response = await client.messages.create(
-                model="claude-3-5-sonnet-20241022",
-                max_tokens=1000,
-                system="You must respond ONLY with a valid JSON block matching the requested format.",
-                messages=[{"role": "user", "content": prompt}]
-            )
-            response_text = response.content[0].text
+            response_text = await call_claude_api(prompt, anthropic_key)
+            llm_circuit_breaker.record_success()
         except Exception as e:
             logger.warning(f"Claude fallback API call failed: {e}. Using mock fallback.")
             
-    if response_text:
-        try:
-            clean_text = response_text.strip()
-            if clean_text.startswith("```json"):
-                clean_text = clean_text[7:]
-            if clean_text.endswith("```"):
-                clean_text = clean_text[:-3]
-            clean_text = clean_text.strip()
-            return json.loads(clean_text)
-        except Exception as e:
-            logger.warning(f"Failed to parse LLM response as JSON: {e}")
-            
-    return generate_mock_json_fallback(prompt, state)
+    if not response_text:
+        llm_circuit_breaker.record_failure()
+        return generate_mock_json_fallback(prompt, state)
+
+    try:
+        return extract_json_from_text(response_text)
+    except Exception as e:
+        logger.warning(f"Failed to parse LLM response as JSON: {e}")
+        return generate_mock_json_fallback(prompt, state)
 
 async def execute_tool(tool_name: str, params: dict, reason: str, state: AgentState):
     await log_agent("reason_node", f"[TOOL ACT] Executing {tool_name} (Reason: {reason}) with params: {json.dumps(params)}")
@@ -705,14 +780,21 @@ async def execute_tool(tool_name: str, params: dict, reason: str, state: AgentSt
         to_phone = phone_map.get(dept.lower())
         if to_phone:
             message_body = f"[RailMind Tool Alert] {dept.upper()}: {msg[:120]}... Urgency: {urgency}"
-            try:
-                sid = await twilio_client.send_incident_alert(to_phone, message_body)
-                if sid:
-                    if "sms_alerts_sent" not in state or state["sms_alerts_sent"] is None:
-                        state["sms_alerts_sent"] = []
-                    state["sms_alerts_sent"].append(sid)
-            except Exception as e:
-                logger.error(f"Error sending SMS: {e}")
+            if twilio_circuit_breaker.can_execute():
+                try:
+                    sid = await twilio_client.send_incident_alert(to_phone, message_body)
+                    if sid:
+                        if "sms_alerts_sent" not in state or state["sms_alerts_sent"] is None:
+                            state["sms_alerts_sent"] = []
+                        state["sms_alerts_sent"].append(sid)
+                    twilio_circuit_breaker.record_success()
+                    twilio_sms_status.labels(status='success').inc()
+                except Exception as e:
+                    logger.error(f"Error sending SMS: {e}")
+                    twilio_circuit_breaker.record_failure()
+                    twilio_sms_status.labels(status='error').inc()
+            else:
+                logger.warning("Twilio Circuit Breaker is OPEN. Skipping SMS.")
         dept_lbl = "Maintenance Team" if "maintenance" in dept.lower() else "Station Manager" if "station" in dept.lower() else "Operations"
         await log_agent("SMS", f"{dept_lbl}: {msg}")
 
@@ -727,16 +809,23 @@ async def execute_tool(tool_name: str, params: dict, reason: str, state: AgentSt
     # 4. Send Passenger Alert
     elif tool_name == "send_passenger_alert":
         msg = params.get("message") or reason
-        p_phone = os.getenv("DEMO_PASSENGER_PHONE", "+1234567894")
+        p_phone = settings.DEMO_PASSENGER_PHONE
         if p_phone:
-            try:
-                sid = await twilio_client.send_incident_alert(p_phone, msg[:160])
-                if sid:
-                    if "sms_alerts_sent" not in state or state["sms_alerts_sent"] is None:
-                        state["sms_alerts_sent"] = []
-                    state["sms_alerts_sent"].append(sid)
-            except Exception as e:
-                logger.error(f"Error sending passenger SMS: {e}")
+            if twilio_circuit_breaker.can_execute():
+                try:
+                    sid = await twilio_client.send_incident_alert(p_phone, msg[:160])
+                    if sid:
+                        if "sms_alerts_sent" not in state or state["sms_alerts_sent"] is None:
+                            state["sms_alerts_sent"] = []
+                        state["sms_alerts_sent"].append(sid)
+                    twilio_circuit_breaker.record_success()
+                    twilio_sms_status.labels(status='success').inc()
+                except Exception as e:
+                    logger.error(f"Error sending passenger SMS: {e}")
+                    twilio_circuit_breaker.record_failure()
+                    twilio_sms_status.labels(status='error').inc()
+            else:
+                logger.warning("Twilio Circuit Breaker is OPEN. Skipping passenger SMS.")
         await log_agent("reason_node", f"[TOOL SUCCESS] Passenger alert dispatched successfully")
 
     # 5. Escalate to Control Room
@@ -1088,12 +1177,19 @@ async def alert_node(state: AgentState) -> AgentState:
             to_phone = phone_map.get(dept)
             if to_phone:
                 message_body = f"[RailMind Alert] {dept.upper()}: {desc[:120]}... Urgency: {urg}"
-                try:
-                    sid = await twilio_client.send_incident_alert(to_phone, message_body)
-                    if sid:
-                        sent_sms.append(sid)
-                except Exception as e:
-                    logger.error(f"Error sending SMS to {dept}: {e}")
+                if twilio_circuit_breaker.can_execute():
+                    try:
+                        sid = await twilio_client.send_incident_alert(to_phone, message_body)
+                        if sid:
+                            sent_sms.append(sid)
+                        twilio_circuit_breaker.record_success()
+                        twilio_sms_status.labels(status='success').inc()
+                    except Exception as e:
+                        logger.error(f"Error sending SMS to {dept}: {e}")
+                        twilio_circuit_breaker.record_failure()
+                        twilio_sms_status.labels(status='error').inc()
+                else:
+                    logger.warning("Twilio Circuit Breaker is OPEN. Skipping alert SMS.")
 
         # Send passenger SMS
         claude_json = state.get("claude_reasoning", "{}")
@@ -1104,12 +1200,19 @@ async def alert_node(state: AgentState) -> AgentState:
 
         pass_sms = claude_response.get("passenger_sms")
         if pass_sms and p_phone:
-            try:
-                sid = await twilio_client.send_incident_alert(p_phone, pass_sms[:160])
-                if sid:
-                    sent_sms.append(sid)
-            except Exception as e:
-                logger.error(f"Error sending passenger SMS: {e}")
+            if twilio_circuit_breaker.can_execute():
+                try:
+                    sid = await twilio_client.send_incident_alert(p_phone, pass_sms[:160])
+                    if sid:
+                        sent_sms.append(sid)
+                    twilio_circuit_breaker.record_success()
+                    twilio_sms_status.labels(status='success').inc()
+                except Exception as e:
+                    logger.error(f"Error sending passenger SMS: {e}")
+                    twilio_circuit_breaker.record_failure()
+                    twilio_sms_status.labels(status='error').inc()
+            else:
+                logger.warning("Twilio Circuit Breaker is OPEN. Skipping passenger SMS.")
 
         await log_agent("alert_node", f"[RAILMIND] SMS alerts sent to {len(sent_sms)} recipients")
         return {"sms_alerts_sent": sent_sms}

@@ -11,3 +11,5 @@ httpx
 websockets
 arq
 redis
+pydantic-settings
+prometheus-client
