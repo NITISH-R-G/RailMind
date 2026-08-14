@@ -27,9 +27,9 @@ def route_from_supervisor(state: AgentState) -> str:
         return END
     return next_node
 
-workflow.add_edge("evaluate_previous_action", "ingest_node")
-workflow.add_edge("ingest_node", "detect_node")
-workflow.add_edge("detect_node", "predict_node")
+# Ensure no hardcoded linear sequences. Supervisor evaluates conditionally.
+workflow.add_edge("evaluate_previous_action", "supervisor_node")
+workflow.add_edge("ingest_node", "supervisor_node")
 workflow.add_edge("predict_node", "supervisor_node")
 
 # All worker nodes return back to the supervisor
@@ -38,14 +38,16 @@ workflow.add_edge("reason_node", "supervisor_node")
 workflow.add_edge("reroute_node", "supervisor_node")
 workflow.add_edge("coordination_node", "supervisor_node")
 workflow.add_edge("alert_node", "supervisor_node")
-workflow.add_edge("report_node", END)
+workflow.add_edge("report_node", "supervisor_node")
 
 # Supervisor dynamically dispatches
 workflow.add_conditional_edges(
     "supervisor_node",
     route_from_supervisor,
     {
+        "ingest_node": "ingest_node",
         "detect_node": "detect_node",
+        "predict_node": "predict_node",
         "reason_node": "reason_node",
         "reroute_node": "reroute_node",
         "coordination_node": "coordination_node",
