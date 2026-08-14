@@ -922,6 +922,61 @@
       "action_required": "Make passenger announcement + update platform boards",
       "status": "pending",
       "timestamp": "2026-06-14 13:04:01.066977"
+    },
+    {
+      "incident_id": "3e00f4f3-18bf-487a-a6a3-b09edda999fa",
+      "department": "maintenance",
+      "task_description": "Platform inspection CNB",
+      "urgency": "critical",
+      "action_required": "Emergency dispatch action",
+      "status": "pending",
+      "timestamp": "2026-08-14 04:38:58.139136"
+    },
+    {
+      "incident_id": "05736d7b-d6e4-4629-b232-3213ffd5090e",
+      "department": "maintenance",
+      "task_description": "Platform inspection CNB",
+      "urgency": "critical",
+      "action_required": "Emergency dispatch action",
+      "status": "pending",
+      "timestamp": "2026-08-14 04:40:34.623877"
+    },
+    {
+      "incident_id": "4cb30242-3e85-4929-8235-f908c15a1785",
+      "department": "maintenance",
+      "task_description": "Platform inspection CNB",
+      "urgency": "critical",
+      "action_required": "Emergency dispatch action",
+      "status": "pending",
+      "timestamp": "2026-08-14 04:42:58.915650"
+    },
+    {
+      "incident_id": "06081d64-b5d5-41be-b77c-31f5782fe657",
+      "department": "maintenance",
+      "task_description": "Platform inspection CNB",
+      "urgency": "critical",
+      "action_required": "Emergency dispatch action",
+      "status": "pending",
+      "timestamp": "2026-08-14 04:43:45.465306"
+    },
+    {
+      "incident_id": "78cb766d-f3a0-4cbf-9166-db78722f2ab0",
+      "department": "maintenance",
+      "task_description": "Platform inspection CNB",
+      "urgency": "critical",
+      "action_required": "Emergency dispatch action",
+      "status": "pending",
+      "timestamp": "2026-08-14 04:47:13.074838"
+    },
+    {
+      "incident_id": "3f662563-926f-4beb-887d-0c5a2cd2dca5",
+      "department": "maintenance",
+      "task_description": "Platform inspection CNB",
+      "urgency": "critical",
+      "action_required": "Emergency dispatch action",
+      "status": "pending",
+      "timestamp": "2026-08-14 04:53:10.643400"
     }
-  ]
+  ],
+  "agent_memory": []
 }
