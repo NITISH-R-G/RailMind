@@ -10,7 +10,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Install python dependencies
 COPY requirements.txt .
-RUN pip install --no-cache-dir --user -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Stage 2: Final
 FROM python:3.11-slim
@@ -21,14 +21,11 @@ RUN useradd -m -s /bin/bash railmind
 WORKDIR /home/railmind/app
 
 # Copy python dependencies from builder
-COPY --chown=railmind:railmind --from=builder /root/.local /home/railmind/.local
-ENV PATH=/home/railmind/.local/bin:$PATH
+COPY --from=builder /usr/local/lib/python3.11/site-packages/ /usr/local/lib/python3.11/site-packages/
+COPY --from=builder /usr/local/bin/ /usr/local/bin/
 
 # Copy application code
 COPY --chown=railmind:railmind . .
-
-# Change ownership
-RUN chown -R railmind:railmind /home/railmind/app
 
 # Switch to non-privileged user
 USER railmind
