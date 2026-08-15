@@ -31,7 +31,10 @@ def test_normal_well_formed_dictionary():
     assert result["source"] == "Source"
     assert result["destination"] == "Destination"
 
-def test_delay_boundary_conditions():
+import unittest.mock
+
+@unittest.mock.patch('time.time', return_value=12345678.0)
+def test_delay_boundary_conditions(mock_time):
     # <= 15 minutes
     data = {"data": {"delay": 15}}
     result = parse_rapidapi_train_for_agent(data, "12345")

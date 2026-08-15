@@ -28,7 +28,7 @@ class DepartmentTask(TypedDict):
     urgency: str
     action_required: str
 
-class AgentState(TypedDict):
+class AgentState(TypedDict, total=False):
     raw_train_data: List[dict]
     anomalies: Annotated[List[TrainAnomaly], append_to_list]
     claude_reasoning: str
