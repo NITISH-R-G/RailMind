@@ -807,101 +807,13 @@ async def reason_node(state: AgentState) -> AgentState:
         import time
         start_time = time.time()
         
-        # STEP 1: PERCEIVE - What is happening?
-        perception_prompt = f"""
-        You are RailMind, India's autonomous railway brain.
+        errors = state.get("errors", [])
+        plan = await reason_with_ai(anomalies, errors=errors)
         
-        Current network status:
-        {json.dumps(state.get("raw_train_data", []), indent=2)}
-        
-        Detected anomalies:
-        {json.dumps(state.get("anomalies", []), indent=2)}
-        
-        Historical context (last 5 incidents):
-        {json.dumps(state.get("incident_history", []), indent=2)}
+        state["claude_reasoning"] = json.dumps(plan)
+        if plan.get("reroute_plan"):
+            state["reroute_plan"] = plan.get("reroute_plan")
 
-        Historical memory for this train at this station:
-        {json.dumps(memories, indent=2)}
-        Use past successful strategies if available.
-        
-        STEP 1 - PERCEIVE: Analyze the full situation.
-        What is ACTUALLY happening on the network right now?
-        Are these anomalies connected? Is there a cascade 
-        failure developing? Pattern analysis only.
-        Respond in JSON: {{"situation": "...", 
-        "is_cascade": true/false, 
-        "affected_corridor": "...",
-        "severity_assessment": "..."}}
-        """
-        await log_agent("THINKING", "Sending to Gemini for perception...")
-        perception = await call_gemini(perception_prompt, state)
-        
-        situation = perception.get('situation', 'Network stress on 2 corridors. Not cascade yet. Individual responses needed.')
-        await log_agent("PERCEIVED", situation)
-        
-        # STEP 2: DECIDE - What should be done?
-        decision_prompt = f"""
-        Situation assessment: {perception}
-
-        Historical memory for this train at this station:
-        {json.dumps(memories, indent=2)}
-        Use past successful strategies if available.
-        
-        STEP 2 - DECIDE: Make autonomous operational decisions.
-        
-        Consider:
-        - Which trains need immediate rerouting?
-        - Which stations need to be alerted?
-        - Is this a single incident or network-wide issue?
-        - What is the priority order of actions?
-        - What is the estimated passenger impact?
-        
-        You have these tools available:
-        - reroute_train(train_no, via_station)
-        - alert_department(dept, message, urgency)
-        - hold_train(train_no, station, duration_mins)
-        - send_passenger_alert(train_no, message)
-        - escalate_to_control_room(incident_summary)
-        
-        Decide which tools to use and in what order.
-        Respond in JSON: {{
-            "decision": "...",
-            "actions": [
-                {{"tool": "reroute_train", 
-                  "params": {{}}, 
-                  "reason": "..."}},
-            ],
-            "passenger_impact": "X passengers affected",
-            "estimated_recovery_time": "X minutes",
-            "confidence": 0.0-1.0
-        }}
-        """
-        await log_agent("DECIDING", "Evaluating 4 possible actions...")
-        decision = await call_gemini(decision_prompt, state)
-        
-        confidence = int(decision.get('confidence', 0.94) * 100)
-        decided_msg = decision.get('decision', 'Rerouting 12301 via Allahabad. Holding 12625 at Nagpur 8 mins.')
-        await log_agent("DECIDED", f"Confidence: {confidence}%. {decided_msg}")
-        
-        # STEP 3: ACT - Execute decisions
-        actions_count = len(decision.get('actions', [])) or 3
-        await log_agent("ACTING", f"Dispatching to {actions_count} departments...")
-        
-        for action in decision.get("actions", []):
-            await execute_tool(action.get("tool"), 
-                              action.get("params", {}), 
-                              action.get("reason", ""),
-                              state)
-        
-        state["perception"] = perception
-        state["decision"] = decision
-        state["claude_reasoning"] = json.dumps({
-            "perception": perception,
-            "decision": decision,
-            "situation_summary": perception.get("situation", ""),
-            "reroute_plan": state.get("reroute_plan") or ""
-        })
-        
         latency = int((time.time() - start_time) * 1000)
         state["ai_latency_ms"] = latency
         await log_agent("reason_node", f"[RAILMIND] Real Autonomous Brain cycle complete ({latency}ms)")
@@ -926,32 +838,32 @@ async def reroute_node(state: AgentState) -> AgentState:
             if start_station == "Kanpur Central" and not target_station:
                 target_station = "Varanasi"
 
-                # Add geo-coordinate checking for A* or DP route discovery fallback
-                lat = anomaly.get("lat")
-                lng = anomaly.get("lng")
-                await log_agent("reroute_node", f"[RAILMIND] Evaluating geo-coordinates (lat: {lat}, lng: {lng}) for track availability...")
+            # Add geo-coordinate checking for A* or DP route discovery fallback
+            lat = anomaly.get("lat")
+            lng = anomaly.get("lng")
+            await log_agent("reroute_node", f"[RAILMIND] Evaluating geo-coordinates (lat: {lat}, lng: {lng}) for track availability...")
 
-                # Bypassing the anomaly location
-                blocked = anomaly.get("location") or start_station
-                result = dijkstra_route_discovery(start_station, target_station, blocked_station=blocked)
-                # If path not found due to blockage, try standard routing
-                if result["status"] != "Success":
-                    result = dijkstra_route_discovery(start_station, target_station)
+            # Bypassing the anomaly location
+            blocked = anomaly.get("location") or start_station
+            result = dijkstra_route_discovery(start_station, target_station, blocked_station=blocked)
+            # If path not found due to blockage, try standard routing
+            if result["status"] != "Success":
+                result = dijkstra_route_discovery(start_station, target_station)
 
-                if result["status"] == "Success":
-                    route_str = " -> ".join(result["route"])
-                    await log_agent("reroute_node", f"[RAILMIND] Dijkstra bypass found: {route_str}")
-                    return {
-                        "reroute_plan": f"Dijkstra detour bypass: {route_str} (ETA {result['cost']} mins)",
-                        "detour_route": result["route"]
-                    }
-                else:
-                    status_msg = result.get("status", "Unknown status")
-                    await log_agent("reroute_node", f"[RAILMIND] No bypass route found: {status_msg}")
-                    return {
-                        "reroute_plan": f"No detour bypass available: {status_msg}",
-                        "detour_route": []
-                    }
+            if result["status"] == "Success":
+                route_str = " -> ".join(result["route"])
+                await log_agent("reroute_node", f"[RAILMIND] Dijkstra bypass found: {route_str}")
+                return {
+                    "reroute_plan": f"Dijkstra detour bypass: {route_str} (ETA {result['cost']} mins)",
+                    "detour_route": result["route"]
+                }
+            else:
+                status_msg = result.get("status", "Unknown status")
+                await log_agent("reroute_node", f"[RAILMIND] No bypass route found: {status_msg}")
+                return {
+                    "reroute_plan": f"No detour bypass available: {status_msg}",
+                    "detour_route": []
+                }
     except Exception as e:
         logger.error(f"Error in reroute_node: {e}")
         await log_agent("reroute_node", f"[RAILMIND] [ERROR] Reroute node failed: {e}")
