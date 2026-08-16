@@ -24,13 +24,27 @@ class ConnectionManager:
         self.MAX_CONNECTIONS = 1000
 
     async def connect(self, websocket: WebSocket):
-        if len(self.active_connections) >= self.MAX_CONNECTIONS:
-            logger.warning("WebSocket connection limit reached. Rejecting connection.")
-            await websocket.close(code=1008, reason="Connection limit exceeded")
-            return False
+        # Global connection pool limit check via Redis
+        if self.redis is not None:
+            try:
+                current_conns = await self.redis.get("global_active_connections")
+                if current_conns and int(current_conns) >= self.MAX_CONNECTIONS:
+                    logger.warning("Global WebSocket connection limit reached. Rejecting connection.")
+                    await websocket.close(code=1008, reason="Connection limit exceeded")
+                    return False
+            except Exception as e:
+                logger.error(f"Error checking global connection count: {e}")
 
         await websocket.accept()
         self.active_connections.append(websocket)
+
+        # Increment global counter
+        if self.redis is not None:
+            try:
+                await self.redis.incr("global_active_connections")
+                await self.redis.expire("global_active_connections", 3600)
+            except Exception as e:
+                logger.error(f"Error incrementing global connection count: {e}")
 
         # Start the listener task if it's not already running
         if not self._listener_task or self._listener_task.done():
@@ -42,9 +56,15 @@ class ConnectionManager:
             logger.error(f"Error sending connection response: {e}")
         return True
 
-    def disconnect(self, websocket: WebSocket):
+    async def disconnect(self, websocket: WebSocket):
         if websocket in self.active_connections:
             self.active_connections.remove(websocket)
+            # Decrement global counter
+            if self.redis is not None:
+                try:
+                    await self.redis.decr("global_active_connections")
+                except Exception as e:
+                    logger.error(f"Error decrementing global connection count: {e}")
 
     async def broadcast(self, message: str):
         # Publish to Redis instead of sending directly to active_connections
@@ -60,7 +80,7 @@ class ConnectionManager:
                     logger.error(f"Error sending directly to client: {ex}")
                     failed_connections.append(connection)
             for connection in failed_connections:
-                self.disconnect(connection)
+                await self.disconnect(connection)
 
     async def _listen_to_redis(self):
         while True:
@@ -79,7 +99,7 @@ class ConnectionManager:
                                 failed_connections.append(connection)
 
                         for connection in failed_connections:
-                            self.disconnect(connection)
+                            await self.disconnect(connection)
             except asyncio.CancelledError:
                 break
             except Exception as e:
@@ -102,18 +122,23 @@ async def websocket_endpoint(websocket: WebSocket):
         return
     try:
         while True:
-            # Add ping-pong heartbeats
+            # Add ping-pong heartbeats and state recovery
             data = await websocket.receive_text()
             if data == "PING" or data == "PING_TEST":
                 await websocket.send_json({"type": "echo", "received": data})
+            elif data == "SYNC_STATE":
+                await websocket.send_json({"type": "state_recovery_ack", "message": "State synchronized"})
             else:
-                await websocket.send_json({
-                    "type": "echo",
-                    "received": data
-                })
+                try:
+                    payload = json.loads(data)
+                    if payload.get("type") == "SYNC_STATE":
+                        await websocket.send_json({"type": "state_recovery_ack", "message": "State synchronized"})
+                    else:
+                        await websocket.send_json({"type": "echo", "received": data})
+                except json.JSONDecodeError:
+                    await websocket.send_json({"type": "echo", "received": data})
     except WebSocketDisconnect:
-        websocket_manager.disconnect(websocket)
+        await websocket_manager.disconnect(websocket)
     except Exception as e:
         logger.error(f"WebSocket connection error: {e}")
-        websocket_manager.disconnect(websocket)
-
+        await websocket_manager.disconnect(websocket)

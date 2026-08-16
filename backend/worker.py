@@ -15,29 +15,42 @@ from backend.services.db_client import db_client
 logger = logging.getLogger(__name__)
 
 # Token Bucket Rate Limiter
-class TokenBucketRateLimiter:
+class RedisTokenBucketRateLimiter:
     def __init__(self, capacity: int, fill_rate: float):
         self.capacity = capacity
         self.fill_rate = fill_rate
-        self.tokens = capacity
-        self.last_fill = time.time()
-        self._lock = asyncio.Lock()
+        self.window_size = 1.0
 
-    async def consume(self, tokens: int = 1):
-        async with self._lock:
-            now = time.time()
-            elapsed = now - self.last_fill
-            self.tokens = min(self.capacity, self.tokens + elapsed * self.fill_rate)
-            self.last_fill = now
+    async def consume(self, redis_conn, tokens: int = 1):
+        now = time.time()
+        window_start = now - self.window_size
+        key = "rate_limit:sliding_window"
 
-            if self.tokens < tokens:
-                raise ValueError(f"Rate limit exceeded. Requested {tokens}, but only {int(self.tokens)} available.")
+        lua_script = """
+        local key = KEYS[1]
+        local window_start = tonumber(ARGV[1])
+        local now = tonumber(ARGV[2])
+        local capacity = tonumber(ARGV[3])
+        local req_id = ARGV[4]
 
-            self.tokens -= tokens
+        redis.call('ZREMRANGEBYSCORE', key, '-inf', window_start)
+        local count = redis.call('ZCOUNT', key, '-inf', '+inf')
+
+        if count >= capacity then
+            return 0
+        end
+
+        redis.call('ZADD', key, now, req_id)
+        return 1
+        """
+        req_id = str(uuid.uuid4())
+
+        allowed = await redis_conn.eval(lua_script, 1, key, window_start, now, self.capacity, req_id)
+        if not allowed:
+            raise ValueError(f"Rate limit exceeded. Capacity {self.capacity}.")
 
 # Limit to 5 requests per second
-rate_limiter = TokenBucketRateLimiter(capacity=5, fill_rate=5.0)
-
+rate_limiter = RedisTokenBucketRateLimiter(capacity=5, fill_rate=5.0)
 async def startup(ctx):
     logger.info("Starting ARQ worker...")
     await db_client.init_indexes()
@@ -45,13 +58,13 @@ async def startup(ctx):
 async def shutdown(ctx):
     logger.info("Shutting down ARQ worker...")
 
-async def run_agent_graph(ctx, train_numbers: list):
+async def process_train_telemetry(ctx, train_numbers: list):
     """
     Decoupled task to run the LangGraph agent graph.
     """
     try:
         # Rate limit enforcement
-        await rate_limiter.consume(1)
+        await rate_limiter.consume(ctx['redis'], 1)
     except ValueError as e:
         logger.error(f"Rate limiting in worker: {e}. Retrying job.")
         raise Retry(defer=1)  # Retry in 1 second
@@ -99,11 +112,11 @@ async def poll_railways_api(ctx):
         "11057", "12627", "12625", "12621", "12615",
         "12309", "12721", "12229", "12311", "12641"
     ]
-    logger.info("Enqueuing run_agent_graph job...")
-    await ctx["redis"].enqueue_job("run_agent_graph", train_numbers)
+    logger.info("Enqueuing process_train_telemetry job...")
+    await ctx["redis"].enqueue_job("process_train_telemetry", train_numbers)
 
 class WorkerSettings:
-    functions = [run_agent_graph]
+    functions = [process_train_telemetry]
     cron_jobs = [
         # Run every minute
         worker.cron(poll_railways_api, minute=set(range(60)))

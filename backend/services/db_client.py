@@ -16,7 +16,7 @@ load_dotenv(dotenv_path=env_path)
 
 # Real MongoDB Atlas Connection for RailMind
 MONGODB_URI = os.getenv("MONGODB_URI")
-client = AsyncIOMotorClient(MONGODB_URI, maxPoolSize=50)
+client = AsyncIOMotorClient(MONGODB_URI, maxPoolSize=50, minPoolSize=10)
 db = client["railmind"]
 
 # Collections needed:
@@ -71,7 +71,8 @@ class FallbackDB:
     async def init_indexes(self):
         try:
             # Create a 2dsphere index for geospatial locations if applicable, or just compound
-            await self.db["incidents"].create_index([("train_number", ASCENDING), ("timestamp", DESCENDING)], unique=True)
+            await self.db["incidents"].create_index([("train_number", ASCENDING), ("timestamp_window", ASCENDING)], unique=True)
+            await self.db["incidents"].create_index([("location_geo", "2dsphere")])
             logger.info("MongoDB indexes created successfully.")
         except Exception as e:
             logger.warning(f"Failed to create indexes: {e}")
