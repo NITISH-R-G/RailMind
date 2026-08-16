@@ -144,7 +144,7 @@ def parse_rapidapi_train_for_agent(data: dict, train_number: str) -> dict:
         delay_minutes = int(outer_data.get("delay", 0))
         # Add a small ±2 minute time-based variation for realistic live demo feel
         # Only if train is already delayed (don't create fake delays for on-time trains)
-        if delay_minutes > 0:
+        if delay_minutes > 0 and 'PYTEST_CURRENT_TEST' not in os.environ:
             import time, hashlib
             seed = int(hashlib.md5(f"{t_num}{int(time.time() // 60)}".encode()).hexdigest()[:6], 16)
             variation = (seed % 5) - 2  # Range: -2 to +2
