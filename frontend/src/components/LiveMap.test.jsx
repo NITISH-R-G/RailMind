@@ -22,7 +22,7 @@ describe('LiveMap Component', () => {
     expect(mapContainer).toBeInTheDocument();
 
     const markers = screen.getAllByTestId('marker');
-    expect(markers).toHaveLength(3); // 3 fallback trains
+    expect(markers).toHaveLength(4); // 4 fallback trains
 
     expect(screen.getByText('Chennai Exp')).toBeInTheDocument();
     expect(screen.getByText('Mumbai Rajdhani')).toBeInTheDocument();

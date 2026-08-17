@@ -345,6 +345,9 @@ export default function LiveMap({ trains = [], incidents = [] }) {
 
   const activeTrains = trains.length > 0 ? trains : [
     { train_number: "12301", train_name: "Howrah Rajdhani", current_station: "New Delhi", delay_minutes: 0, status: "On Time", lat: 28.6419, lng: 77.2194, speed: "120 km/h", next_station: "Kanpur Central", distance_next: "440 KM" },
+    { train_number: "12951", train_name: "Mumbai Rajdhani", current_station: "Mumbai Central", delay_minutes: 0, status: "On Time", lat: 18.9690, lng: 72.8205, speed: "110 km/h", next_station: "Surat", distance_next: "260 KM" },
+    { train_number: "12269", train_name: "Chennai Exp", current_station: "Chennai Central", delay_minutes: 0, status: "On Time", lat: 13.0827, lng: 80.2707, speed: "105 km/h", next_station: "Vijayawada", distance_next: "430 KM" },
+    { train_number: "12273", train_name: "Howrah Duronto", current_station: "Howrah", delay_minutes: 0, status: "On Time", lat: 22.5958, lng: 88.2636, speed: "130 km/h", next_station: "Asansol", distance_next: "200 KM" }
   ];
 
   const selectedTrain = activeTrains.find(t => t.train_number === selectedTrainNo);
