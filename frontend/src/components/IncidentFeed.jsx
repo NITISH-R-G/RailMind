@@ -1,5 +1,6 @@
 /* eslint-disable */
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
+import { VariableSizeList } from 'react-window';
 import { ShieldAlert, AlertTriangle, Info, CheckCircle2, Lock, Unlock, BrainCircuit, Navigation } from 'lucide-react';
 
 const STATION_COORDS = {
@@ -179,6 +180,27 @@ export default function IncidentFeed({ incidents = [], onApprove, onOverride, on
   const [activeOverrideId, setActiveOverrideId] = useState(null);
   const [overrideText, setOverrideText] = useState("");
 
+  const listRef = useRef(null);
+
+  // When expanding or collapsing, recalculate heights
+  useEffect(() => {
+    if (listRef.current) {
+      listRef.current.resetAfterIndex(0);
+    }
+  }, [expandedIds, activeOverrideId, incidents]);
+
+  const getItemSize = (index) => {
+    const incident = incidents[index];
+    let baseHeight = 250; // Approximated base height for a row
+    if (activeOverrideId === incident.id) {
+      baseHeight += 40;
+    }
+    if (expandedIds.has(incident.id)) {
+      baseHeight += 60; // Approximated height for expanded desc
+    }
+    return baseHeight;
+  };
+
   const toggleExpand = (id) => {
     const next = new Set(expandedIds);
     if (next.has(id)) {
@@ -266,11 +288,8 @@ export default function IncidentFeed({ incidents = [], onApprove, onOverride, on
       {/* Feed list */}
       <div style={{
         flex: 1,
-        overflowY: 'auto',
-        padding: '16px',
         display: 'flex',
-        flexDirection: 'column',
-        gap: '12px'
+        flexDirection: 'column'
       }}>
         {incidents.length === 0 ? (
           <div className="palantir-mono" style={{
@@ -278,46 +297,57 @@ export default function IncidentFeed({ incidents = [], onApprove, onOverride, on
             fontSize: '11px',
             textAlign: 'center',
             padding: '30px 10px',
+            margin: '16px',
             border: '1px dashed #1a2433'
           }}>
             [ NO ACTIVE OPERATIONS ALERTS RECORDED ]
           </div>
         ) : (
-          incidents.map((incident) => {
-            const isExpanded = expandedIds.has(incident.id);
-            const severityStyles = getSeverityStyles(incident.severity);
-            const SeverityIcon = severityStyles.icon;
-            
-            const trainNumber = incident.train_number || "12301";
-            const trainName = incident.train_name || "Howrah Rajdhani";
-            const delayMins = incident.delay_minutes || 45;
-            const currentStationName = incident.current_station || "Kanpur Central";
-            
-            // Extract route and display code
-            const displayCode = incident.current_station ? (incident.current_station.includes("(") ? incident.current_station.match(/\(([^)]+)\)/)?.[1] : incident.current_station) : "CNB";
-            const routeGraphic = getRouteGraphic(trainNumber, displayCode);
+          <VariableSizeList
+            ref={listRef}
+            height={600}
+            itemCount={incidents.length}
+            itemSize={getItemSize}
+            width="100%"
+            style={{ padding: '0 16px' }}
+          >
+            {({ index, style }) => {
+              const incident = incidents[index];
+              const isExpanded = expandedIds.has(incident.id);
+              const severityStyles = getSeverityStyles(incident.severity);
+              const SeverityIcon = severityStyles.icon;
 
-            const isOverriding = activeOverrideId === incident.id;
-            
-            const passengersText = incident.passenger_impact || `👥 ~2,847 passengers affected`;
-            const predictionText = incident.prediction || `If unresolved: 3 more trains will be delayed by 14:30`;
-            const confidenceScore = incident.confidence_score || 94;
+              const trainNumber = incident.train_number || "12301";
+              const trainName = incident.train_name || "Howrah Rajdhani";
+              const delayMins = incident.delay_minutes || 45;
+              const currentStationName = incident.current_station || "Kanpur Central";
 
-            return (
-              <div 
-                key={incident.id} 
-                style={{
-                  backgroundColor: '#121820',
-                  border: `1px solid #1a2433`,
-                  borderLeft: `3px solid ${severityStyles.color}`,
-                  padding: '14px',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '10px',
-                  boxShadow: '0 2px 4px rgba(0,0,0,0.2)',
-                  fontFamily: "'JetBrains Mono', monospace"
-                }}
-              >
+              // Extract route and display code
+              const displayCode = incident.current_station ? (incident.current_station.includes("(") ? incident.current_station.match(/\(([^)]+)\)/)?.[1] : incident.current_station) : "CNB";
+              const routeGraphic = getRouteGraphic(trainNumber, displayCode);
+
+              const isOverriding = activeOverrideId === incident.id;
+
+              const passengersText = incident.passenger_impact || `👥 ~2,847 passengers affected`;
+              const predictionText = incident.prediction || `If unresolved: 3 more trains will be delayed by 14:30`;
+              const confidenceScore = incident.confidence_score || 94;
+
+              return (
+                <div style={{ ...style, paddingBottom: '12px', paddingTop: index === 0 ? '16px' : '0' }}>
+                  <div
+                    style={{
+                      height: '100%',
+                      backgroundColor: '#121820',
+                      border: `1px solid #1a2433`,
+                      borderLeft: `3px solid ${severityStyles.color}`,
+                      padding: '14px',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '10px',
+                      boxShadow: '0 2px 4px rgba(0,0,0,0.2)',
+                      fontFamily: "'JetBrains Mono', monospace"
+                    }}
+                  >
                 {/* Header: Severity & Timer */}
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -576,9 +606,11 @@ export default function IncidentFeed({ incidents = [], onApprove, onOverride, on
                     {incident.situation_summary || incident.description}
                   </div>
                 )}
-              </div>
-            );
-          })
+                  </div>
+                </div>
+              );
+            }}
+          </VariableSizeList>
         )}
       </div>
 

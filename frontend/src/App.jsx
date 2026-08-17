@@ -1,5 +1,6 @@
 /* eslint-disable */
 import React, { useState, useEffect, useRef, useMemo } from 'react';
+import useStore from './store';
 import Sidebar from './components/Sidebar';
 import TopBar from './components/TopBar';
 import LiveMap from './components/LiveMap';
@@ -63,18 +64,28 @@ class ErrorBoundary extends React.Component {
 
 function MainApp() {
   const [activeTab, setActiveTab] = useState('Dashboard');
-  const [loopCount, setLoopCount] = useState(0);
-  const [incidentCount, setIncidentCount] = useState(0);
-  const [incidents, setIncidents] = useState([]);
-  const [tasks, setTasks] = useState([]);
-  const [trains, setTrains] = useState([]);
-  const [wsStatus, setWsStatus] = useState('reconnecting');
-  const [logs, setLogs] = useState([]);
   
   // Modal Overlay States
   const [showSettings, setShowSettings] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
+
+  const loopCount = useStore(state => state.loopCount);
+  const incidentCount = useStore(state => state.incidentCount);
+  const incidents = useStore(state => state.incidents);
+  const tasks = useStore(state => state.tasks);
+  const trains = useStore(state => state.trains);
+  const wsStatus = useStore(state => state.wsStatus);
+  const logs = useStore(state => state.logs);
+
+  const fetchIncidents = useStore(state => state.fetchIncidents);
+  const fetchTrains = useStore(state => state.fetchTrains);
+  const fetchTasks = useStore(state => state.fetchTasks);
+  const connectWS = useStore(state => state.connectWS);
+
+  const handleApproveStore = useStore(state => state.handleApprove);
+  const handleAcknowledge = useStore(state => state.handleAcknowledge);
+  const handleResolve = useStore(state => state.handleResolve);
 
   const recentIncidentElements = useMemo(() => {
     const result = [];
@@ -104,62 +115,6 @@ function MainApp() {
   const socketRef = useRef(null);
   const API_BASE = `http://${window.location.hostname}:8000`;
 
-  // Fetch functions
-  const fetchIncidents = async () => {
-    try {
-      const res = await fetch(`${API_BASE}/api/incidents`);
-      if (res.ok) {
-        const data = await res.json();
-        const formatted = data.map(inc => ({
-          id: inc.incident_id || inc._id,
-          severity: inc.severity || "info",
-          title: inc.incident_title || inc.summary || "Operations Anomaly",
-          description: inc.situation_summary || inc.summary || "Investigating operational status.",
-          timestamp: new Date(inc.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          incident_title: inc.incident_title || inc.summary || "Operations Anomaly",
-          situation_summary: inc.situation_summary || inc.summary || "Investigating operational status.",
-          reroute_plan: inc.reroute_plan || null,
-          maintenance_task: inc.maintenance_task || '',
-          operations_task: inc.operations_task || '',
-          station_manager_task: inc.station_manager_task || '',
-          passenger_sms: inc.passenger_sms || '',
-          resolution_status: inc.resolution_status || 'pending',
-          approved: inc.resolution_status === 'approved',
-          departments: inc.departments_notified || [],
-          train_number: inc.train_number || 'Unknown'
-        }));
-        setIncidents(formatted);
-        setIncidentCount(formatted.length);
-      }
-    } catch (err) {
-      console.error("[API] Failed to fetch incidents:", err);
-    }
-  };
-
-  const fetchTrains = async () => {
-    try {
-      const res = await fetch(`${API_BASE}/api/trains`);
-      if (res.ok) {
-        const data = await res.json();
-        setTrains(data);
-      }
-    } catch (err) {
-      console.error("[API] Failed to fetch trains:", err);
-    }
-  };
-
-  const fetchTasks = async () => {
-    try {
-      const res = await fetch(`${API_BASE}/api/dept-tasks`);
-      if (res.ok) {
-        const data = await res.json();
-        setTasks(data);
-      }
-    } catch (err) {
-      console.error("[API] Failed to fetch department tasks:", err);
-    }
-  };
-
   useEffect(() => {
     fetchIncidents();
     fetchTrains();
@@ -167,85 +122,15 @@ function MainApp() {
 
     // Poll trains every 5 seconds for live position updates
     const trainInterval = setInterval(fetchTrains, 5000);
-    const wsUrl = `ws://${window.location.hostname}:8000/ws`;
-    let socket;
-    let reconnectTimeout;
 
-    const connectWS = () => {
-      console.log("[WEBSOCKET] Connecting to:", wsUrl);
-      socket = new WebSocket(wsUrl);
-      socketRef.current = socket;
-
-      socket.onopen = () => {
-        console.log("[WEBSOCKET] Connected to RailMind WebSocket server");
-        setWsStatus('connected');
-      };
-
-      socket.onmessage = (event) => {
-        try {
-          const payload = JSON.parse(event.data);
-          
-          if (payload.type === 'INCIDENT_UPDATE') {
-            const report = payload.data;
-            
-            const newIncident = {
-              id: report.incident_id,
-              severity: report.severity || "info",
-              title: report.incident_title || report.summary || "New Incident Logged",
-              description: report.situation_summary || report.summary || "Investigating operational status.",
-              timestamp: new Date(report.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-              incident_title: report.incident_title || report.summary || "New Incident Logged",
-              situation_summary: report.situation_summary || report.summary || "Investigating operational status.",
-              reroute_plan: report.reroute_plan || null,
-              maintenance_task: report.maintenance_task || '',
-              operations_task: report.operations_task || '',
-              station_manager_task: report.station_manager_task || '',
-              passenger_sms: report.passenger_sms || '',
-              resolution_status: report.resolution_status || 'pending',
-              approved: report.resolution_status === 'approved',
-              departments: report.departments_notified || [],
-              train_number: report.train_number || 'Unknown'
-            };
-
-            setIncidents(prev => {
-              if (prev.some(inc => inc.id === newIncident.id)) return prev;
-              return [newIncident, ...prev];
-            });
-            setIncidentCount(prev => prev + 1);
-            if (report.loop_count !== undefined) {
-              setLoopCount(report.loop_count);
-            }
-
-            fetchTasks();
-            fetchTrains();
-          } else if (payload.type === 'AGENT_LOG') {
-            setLogs(prev => [...prev, payload].slice(-200)); // Keep last 200 logs
-          }
-        } catch (err) {
-          console.error("[WEBSOCKET] Error parsing socket data:", err);
-        }
-      };
-
-      socket.onclose = () => {
-        console.log("[WEBSOCKET] Closed. Reconnecting in 3 seconds...");
-        setWsStatus('reconnecting');
-        reconnectTimeout = setTimeout(connectWS, 3000);
-      };
-
-      socket.onerror = (err) => {
-        console.error("[WEBSOCKET] Error encountered:", err);
-        socket.close();
-      };
-    };
-
-    connectWS();
+    const socket = connectWS();
+    socketRef.current = socket;
 
     return () => {
-      if (socket) socket.close();
-      clearTimeout(reconnectTimeout);
+      if (socketRef.current) socketRef.current.close();
       clearInterval(trainInterval);
     };
-  }, []);
+  }, [fetchIncidents, fetchTrains, fetchTasks, connectWS]);
 
   const handleApprove = async (incidentId) => {
     console.log(`Approving reroute plan for incident: ${incidentId}`);
@@ -253,56 +138,7 @@ function MainApp() {
     if (adminPassword === null) {
       return; // User cancelled
     }
-    try {
-      const headers = new Headers();
-      headers.set('Authorization', 'Basic ' + btoa('admin:' + adminPassword));
-      const res = await fetch(`${API_BASE}/api/incidents/${incidentId}/approve`, {
-        method: 'POST',
-        headers: headers
-      });
-      if (res.ok) {
-        setIncidents(prev => prev.map(inc => {
-          if (inc.id === incidentId) {
-            return { ...inc, approved: true };
-          }
-          return inc;
-        }));
-      } else if (res.status === 401) {
-        alert("Incorrect admin password.");
-        console.error("Unauthorized: Incorrect admin password.");
-      } else {
-        console.error("Failed to approve incident reroute plan on backend");
-      }
-    } catch (err) {
-      console.error("Error approving reroute plan:", err);
-    }
-  };
-
-  const handleAcknowledge = (incidentId) => {
-    console.log(`Acknowledging warning incident: ${incidentId}`);
-    setIncidents(prev => prev.filter(inc => inc.id !== incidentId));
-    setIncidentCount(prev => Math.max(0, prev - 1));
-  };
-
-  const handleResolve = async (taskId) => {
-    console.log(`Resolving department task: ${taskId}`);
-    try {
-      const res = await fetch(`${API_BASE}/api/dept-tasks/${taskId}/resolve`, {
-        method: 'POST'
-      });
-      if (res.ok) {
-        setTasks(prev => prev.map(t => {
-          if (t._id === taskId || t.id === taskId) {
-            return { ...t, status: 'resolved', urgency: 'resolved' };
-          }
-          return t;
-        }));
-      } else {
-        console.error("Failed to mark task resolved on API server");
-      }
-    } catch (err) {
-      console.error("Error sending resolution request:", err);
-    }
+    await handleApproveStore(incidentId, adminPassword);
   };
 
   // Views Render Functions
@@ -1213,24 +1049,50 @@ function MainApp() {
     switch (activeTab) {
       case 'Dashboard':
         return (
-          <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: '1fr 400px',
+            gridTemplateRows: '1fr 300px',
+            flex: 1,
+            overflow: 'hidden',
+            backgroundColor: '#080a0d',
+            gap: '1px'
+          }}>
             <div style={{
+              gridColumn: '1 / 2',
+              gridRow: '1 / 2',
+              position: 'relative',
+              borderRight: '1px solid #26354A',
+              borderBottom: '1px solid #26354A',
+            }}>
+              <LiveMap trains={trains} incidents={incidents} />
+            </div>
+
+            <div style={{
+              gridColumn: '2 / 3',
+              gridRow: '1 / 3',
+              borderLeft: '1px solid #26354A',
               display: 'flex',
               flexDirection: 'column',
-              flex: 1,
-              borderRight: '1px solid #1a2433',
-              backgroundColor: '#080a0d'
+              overflow: 'hidden'
             }}>
-              <div style={{ flex: 1, position: 'relative' }}>
-                <LiveMap trains={trains} incidents={incidents} />
-              </div>
-              <TaskBoard tasks={tasks} onResolve={handleResolve} />
+              <IncidentFeed
+                incidents={incidents}
+                onApprove={handleApprove}
+                onAcknowledge={handleAcknowledge}
+              />
             </div>
-            <IncidentFeed 
-              incidents={incidents} 
-              onApprove={handleApprove}
-              onAcknowledge={handleAcknowledge}
-            />
+
+            <div style={{
+              gridColumn: '1 / 2',
+              gridRow: '2 / 3',
+              borderRight: '1px solid #26354A',
+              display: 'flex',
+              flexDirection: 'column',
+              overflow: 'hidden'
+            }}>
+              <TaskBoard tasks={tasks} onResolve={handleResolve} fullScreen={true} />
+            </div>
           </div>
         );
 
