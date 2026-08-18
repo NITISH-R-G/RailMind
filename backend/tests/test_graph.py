@@ -58,10 +58,11 @@ async def test_reason_node_tool_recovery():
 
         # Verify it handled the exception and returned the fallback mock dictionary
         assert new_state.get("claude_reasoning") is not None
+        assert new_state.get("claude_reasoning") != "{}"
 
         parsed = json.loads(new_state["claude_reasoning"])
         assert "situation_summary" in parsed
-        assert "delayed" in parsed["situation_summary"]
+        assert "delayed by 100 minutes" in parsed["situation_summary"]
 
 @pytest.mark.asyncio
 async def test_supervisor_self_correction():
