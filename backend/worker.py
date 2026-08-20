@@ -61,8 +61,51 @@ async def run_agent_graph(ctx, train_numbers: list):
         # or just trigger it. In our nodes.py, `ingest_node` ignores what we pass and uses a hardcoded list.
         # We will modify nodes.py to read `target_trains` from state, or fallback to the list.
 
+        # In the decoupled ingestion architecture, ARQ workers pass telemetry chunks directly
+        # into the LangGraph AgentState via the raw_train_data field, eliminating the need
+        # for nodes to perform synchronous, blocking API calls.
+
+        from backend.services.railways_api import RailwaysAPIClient, get_mock_rapidapi_train, parse_rapidapi_train_for_agent
+        api_key = os.getenv("RAILWAYS_API_KEY", "mock_key")
+        railways_client = RailwaysAPIClient(api_key=api_key)
+
+        start_time = time.time()
+        logger.info(f"Worker calling Railways API for {len(train_numbers)} trains...")
+        results = await railways_client.get_multiple_trains(train_numbers)
+
+        train_results = []
+        for tn in train_numbers:
+            found = False
+            for r in results:
+                if r.get("train_number") == tn:
+                    train_results.append(r)
+                    found = True
+                    break
+            if not found:
+                mock_data = get_mock_rapidapi_train(tn)
+                parsed_mock = parse_rapidapi_train_for_agent(mock_data, tn)
+                if parsed_mock:
+                    train_results.append(parsed_mock)
+
+        from backend.services.railways_api import get_cancelled_trains
+        cancelled = await get_cancelled_trains()
+        live_trains = train_results.copy()
+        for train in cancelled:
+            live_trains.append({
+                "train_number": train.get("TrainNo", "Unknown"),
+                "train_name": train.get("TrainName", "Unknown"),
+                "status": "cancelled",
+                "delay_minutes": 999,
+                "passenger_load": "overcrowded",
+                "current_station": "Unknown",
+                "lat": 20.5937,
+                "lng": 78.9629
+            })
+
+        latency = int((time.time() - start_time) * 1000)
+
         initial_state = AgentState(
-            raw_train_data=[],
+            raw_train_data=live_trains,
             anomalies=[],
             claude_reasoning="",
             reroute_plan=None,
@@ -71,8 +114,8 @@ async def run_agent_graph(ctx, train_numbers: list):
             incident_report=None,
             loop_count=0,
             should_continue=False,
-            last_api_call="Never",
-            railways_latency_ms=0,
+            last_api_call=datetime.utcnow().isoformat(),
+            railways_latency_ms=latency,
             ai_latency_ms=0,
             processed_trains=[],
             # Inject dynamic configuration
