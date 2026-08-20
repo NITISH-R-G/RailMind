@@ -24,8 +24,23 @@ class ConnectionManager:
         self.MAX_CONNECTIONS = 1000
 
     async def connect(self, websocket: WebSocket):
-        if len(self.active_connections) >= self.MAX_CONNECTIONS:
-            logger.warning("WebSocket connection limit reached. Rejecting connection.")
+        # Use Redis atomic counter for global connection pool limits
+        if self.redis is not None:
+            try:
+                active = await self.redis.incr("global_active_connections")
+                await self.redis.expire("global_active_connections", 3600)  # Add TTL to prevent leaks
+                if active > self.MAX_CONNECTIONS:
+                    logger.warning("Global WebSocket connection limit reached. Rejecting connection.")
+                    await self.redis.decr("global_active_connections")
+                    await websocket.close(code=1008, reason="Connection limit exceeded")
+                    return False
+            except Exception as e:
+                logger.error(f"Redis connection tracking error: {e}")
+                # Fallback to local limit if Redis fails
+                if len(self.active_connections) >= self.MAX_CONNECTIONS:
+                    await websocket.close(code=1008, reason="Connection limit exceeded")
+                    return False
+        elif len(self.active_connections) >= self.MAX_CONNECTIONS:
             await websocket.close(code=1008, reason="Connection limit exceeded")
             return False
 
@@ -42,9 +57,14 @@ class ConnectionManager:
             logger.error(f"Error sending connection response: {e}")
         return True
 
-    def disconnect(self, websocket: WebSocket):
+    async def disconnect(self, websocket: WebSocket):
         if websocket in self.active_connections:
             self.active_connections.remove(websocket)
+            if self.redis is not None:
+                try:
+                    await self.redis.decr("global_active_connections")
+                except Exception as e:
+                    logger.error(f"Error decrementing global connections: {e}")
 
     async def broadcast(self, message: str):
         # Publish to Redis instead of sending directly to active_connections
@@ -60,7 +80,7 @@ class ConnectionManager:
                     logger.error(f"Error sending directly to client: {ex}")
                     failed_connections.append(connection)
             for connection in failed_connections:
-                self.disconnect(connection)
+                await self.disconnect(connection)
 
     async def _listen_to_redis(self):
         while True:
@@ -79,7 +99,7 @@ class ConnectionManager:
                                 failed_connections.append(connection)
 
                         for connection in failed_connections:
-                            self.disconnect(connection)
+                            await self.disconnect(connection)
             except asyncio.CancelledError:
                 break
             except Exception as e:
@@ -104,6 +124,16 @@ async def websocket_endpoint(websocket: WebSocket):
         while True:
             # Add ping-pong heartbeats
             data = await websocket.receive_text()
+
+            # Explicit state recovery parsing for frontend sync
+            try:
+                parsed_data = json.loads(data)
+                if isinstance(parsed_data, dict) and parsed_data.get("type") == "SYNC_STATE":
+                    await websocket.send_json({"type": "state_recovery_ack", "status": "synchronized"})
+                    continue
+            except json.JSONDecodeError:
+                pass
+
             if data == "PING" or data == "PING_TEST":
                 await websocket.send_json({"type": "echo", "received": data})
             else:
@@ -112,8 +142,8 @@ async def websocket_endpoint(websocket: WebSocket):
                     "received": data
                 })
     except WebSocketDisconnect:
-        websocket_manager.disconnect(websocket)
+        await websocket_manager.disconnect(websocket)
     except Exception as e:
         logger.error(f"WebSocket connection error: {e}")
-        websocket_manager.disconnect(websocket)
+        await websocket_manager.disconnect(websocket)
 

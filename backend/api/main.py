@@ -78,66 +78,15 @@ latest_agent_state = {
 }
 
 
-async def run_agent_loop_fallback():
-    from ..agents.graph import railmind_graph
-    from ..agents.state import AgentState
-    import uuid
-    train_numbers = [
-        "12301", "12951", "12001", "12259", "12565",
-        "11057", "12627", "12625", "12621", "12615",
-        "12309", "12721", "12229", "12311", "12641"
-    ]
-    processed_trains = []
-    
-    # Wait a few seconds for startup to settle
-    await asyncio.sleep(5)
-    
-    while True:
-        try:
-            print("[RAILMIND] Local background agent loop run starting...")
-            initial_state = AgentState(
-                raw_train_data=[],
-                anomalies=[],
-                claude_reasoning="",
-                reroute_plan=None,
-                department_tasks=[],
-                sms_alerts_sent=[],
-                incident_report=None,
-                loop_count=0,
-                should_continue=False,
-                last_api_call="Never",
-                railways_latency_ms=0,
-                ai_latency_ms=0,
-                processed_trains=processed_trains,
-                target_trains=train_numbers
-            )
-            thread_id = f"local_bg_{uuid.uuid4().hex[:8]}"
-            config = {"configurable": {"thread_id": thread_id}, "recursion_limit": 20}
-            result = await railmind_graph.ainvoke(initial_state, config)
-            if result:
-                processed_trains = result.get("processed_trains", [])
-                latest_agent_state.update({
-                    "raw_train_data": result.get("raw_train_data", []),
-                    "anomalies": result.get("anomalies", []),
-                    "claude_reasoning": result.get("claude_reasoning", ""),
-                    "reroute_plan": result.get("reroute_plan"),
-                    "department_tasks": result.get("department_tasks", []),
-                    "sms_alerts_sent": result.get("sms_alerts_sent", []),
-                    "incident_report": result.get("incident_report"),
-                    "loop_count": result.get("loop_count", 0),
-                    "should_continue": result.get("should_continue", False),
-                    "last_api_call": result.get("last_api_call", "Never"),
-                    "railways_latency_ms": result.get("railways_latency_ms", 0),
-                    "ai_latency_ms": result.get("ai_latency_ms", 0),
-                    "processed_trains": processed_trains
-                })
-            print("[RAILMIND] Local background agent loop run completed.")
-        except Exception as e:
-            print(f"[RAILMIND] Local background agent loop failed: {e}")
-        await asyncio.sleep(60)
+import redis.asyncio as aioredis
+from arq import create_pool
+from arq.connections import RedisSettings
+
+global_redis_client = None
 
 @app.on_event("startup")
 async def startup_event():
+    global global_redis_client
     # Test connection on startup and clean collections:
     try:
         from ..services.db_client import client, db
@@ -152,8 +101,56 @@ async def startup_event():
     except Exception as e:
         print(f"[RAILMIND] MongoDB connection/cleanup failed: {e}")
 
-    # Run the agent workflow loop asynchronously in the background on API startup
-    asyncio.create_task(run_agent_loop_fallback())
+    # Initialize ARQ Redis pool and general Redis client for rate limiting
+    redis_url = os.getenv("REDIS_URL", "redis://localhost:6379")
+    app.state.redis_pool = await create_pool(RedisSettings.from_dsn(redis_url))
+    global_redis_client = aioredis.from_url(redis_url, decode_responses=True)
+
+import time
+from pydantic import BaseModel
+from typing import List
+
+class TelemetryChunk(BaseModel):
+    train_numbers: List[str]
+
+@app.post("/api/telemetry/ingest")
+async def telemetry_ingest(chunk: TelemetryChunk):
+    global global_redis_client
+
+    if global_redis_client is None:
+        raise HTTPException(status_code=500, detail="Redis client not initialized")
+
+    # Token Bucket Rate Limiting (Sliding Window)
+    # 5 requests per second limit
+    window_size = 1.0 # 1 second window
+    max_requests = 5
+    now = time.time()
+
+    pipeline = global_redis_client.pipeline(transaction=True)
+    # Remove older entries outside window
+    pipeline.zremrangebyscore("rate_limit:ingest", 0, now - window_size)
+    # Get count in current window
+    pipeline.zcard("rate_limit:ingest")
+    results = await pipeline.execute()
+
+    current_requests = results[1]
+
+    if current_requests >= max_requests:
+        raise HTTPException(status_code=429, detail="Too Many Requests")
+
+    # Read-then-write approach: Add current request
+    pipeline = global_redis_client.pipeline(transaction=True)
+    pipeline.zadd("rate_limit:ingest", {str(now): now})
+    pipeline.expire("rate_limit:ingest", int(window_size) + 1)
+    await pipeline.execute()
+
+    # Enqueue to ARQ
+    if not hasattr(app.state, "redis_pool"):
+        raise HTTPException(status_code=500, detail="ARQ pool not initialized")
+
+    await app.state.redis_pool.enqueue_job("run_agent_graph", chunk.train_numbers)
+    return {"status": "accepted"}
+
 
 # Include general REST routers
 app.include_router(router, prefix="/api")

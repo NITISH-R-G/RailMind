@@ -16,7 +16,7 @@ load_dotenv(dotenv_path=env_path)
 
 # Real MongoDB Atlas Connection for RailMind
 MONGODB_URI = os.getenv("MONGODB_URI")
-client = AsyncIOMotorClient(MONGODB_URI, maxPoolSize=50)
+client = AsyncIOMotorClient(MONGODB_URI, maxPoolSize=50, minPoolSize=10)
 db = client["railmind"]
 
 # Collections needed:
@@ -70,8 +70,13 @@ class FallbackDB:
 
     async def init_indexes(self):
         try:
-            # Create a 2dsphere index for geospatial locations if applicable, or just compound
-            await self.db["incidents"].create_index([("train_number", ASCENDING), ("timestamp", DESCENDING)], unique=True)
+            # Create a 2dsphere index for geospatial locations
+            await self.db["incidents"].create_index([("location_geo", "2dsphere")])
+            # Atomic unique compound index using bucketed timestamp window
+            await self.db["incidents"].create_index(
+                [("train_number", ASCENDING), ("timestamp_window", ASCENDING)],
+                unique=True
+            )
             logger.info("MongoDB indexes created successfully.")
         except Exception as e:
             logger.warning(f"Failed to create indexes: {e}")
@@ -112,27 +117,13 @@ class FallbackDB:
         await asyncio.to_thread(self._sync_write_fallback, data)
 
     async def has_recent_incident(self, train_number, minutes=2):
-        from datetime import datetime, timedelta
-        cutoff = datetime.utcnow() - timedelta(minutes=minutes)
-        
+        # We rely on DuplicateKeyError on insert with timestamp_window, so just return False for MongoDB
         if not self.use_fallback:
-            try:
-                # With unique compound indexes on train_number+timestamp, we don't strictly need this $gt check
-                # if we just catch DuplicateKeyError on insert, but we'll leave it for reading if needed.
-                # Since the instruction says use DuplicateKeyError INSTEAD OF $gt, let's just return False
-                # and let the insert catch the duplicate, OR query explicitly without $gt if we bucket by hour.
-                # Actually, the simplest optimization is just returning False here and relying on unique indexes
-                # during insert, but let's keep the exact signature and just catch it in insert_incident.
-                existing = await self.db["incidents"].find_one({
-                    "train_number": train_number,
-                    "timestamp": {"$gt": cutoff.isoformat()}
-                })
-                return existing is not None
-            except Exception as e:
-                logger.warning(f"MongoDB has_recent_incident failed: {e}. Falling back.")
-                self.use_fallback = True
+            return False
 
         # Fallback file check
+        from datetime import datetime, timedelta
+        cutoff = datetime.utcnow() - timedelta(minutes=minutes)
         async with self._lock:
             data = await self._read_fallback()
             for inc in data["incidents"]:
@@ -152,7 +143,24 @@ class FallbackDB:
     async def insert_incident(self, incident):
         if not self.use_fallback:
             try:
-                await self.db["incidents"].insert_one(incident.copy())
+                incident_copy = incident.copy()
+
+                # Add timestamp_window for duplicate prevention (bucketed to 5 minutes)
+                ts_str = incident_copy.get("timestamp")
+                if ts_str:
+                    try:
+                        if isinstance(ts_str, datetime):
+                            ts = ts_str
+                        else:
+                            ts = datetime.fromisoformat(str(ts_str))
+                        # Floor to nearest 5 minutes
+                        minute = (ts.minute // 5) * 5
+                        window = ts.replace(minute=minute, second=0, microsecond=0)
+                        incident_copy["timestamp_window"] = window.isoformat()
+                    except Exception:
+                        incident_copy["timestamp_window"] = str(datetime.utcnow())
+
+                await self.db["incidents"].insert_one(incident_copy)
                 return True
             except DuplicateKeyError:
                 logger.info(f"Duplicate incident detected for train {incident.get('train_number')} at {incident.get('timestamp')}")
