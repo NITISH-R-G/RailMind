@@ -13,7 +13,7 @@ def append_to_list(a: Optional[List], b: Optional[List]) -> List:
 
     return a + b
 
-class TrainAnomaly(TypedDict):
+class TrainAnomaly(TypedDict, total=False):
     train_number: str
     train_name: str
     anomaly_type: str  # "delay", "overcrowding", "track_fault", "cancellation"
@@ -21,19 +21,26 @@ class TrainAnomaly(TypedDict):
     location: str
     delay_minutes: Optional[int]
     passenger_load: Optional[str]
+    lat: Optional[float]
+    lng: Optional[float]
+    current_station: Optional[str]
+    destination: Optional[str]
+    status: Optional[str]
+    source: Optional[str]
 
-class DepartmentTask(TypedDict):
+class DepartmentTask(TypedDict, total=False):
     department: str    # "maintenance", "operations", "station_manager"
     task_description: str
     urgency: str
     action_required: str
 
-class AgentState(TypedDict):
+class AgentState(TypedDict, total=False):
     raw_train_data: List[dict]
     anomalies: Annotated[List[TrainAnomaly], append_to_list]
     claude_reasoning: str
     reroute_plan: Optional[str]
-    department_tasks: Annotated[List[DepartmentTask], operator.add]
+    department_tasks: Annotated[List[dict], operator.add]
+    agent_logs: Annotated[List[dict], operator.add]
     sms_alerts_sent: Annotated[List[str], append_to_list]
     incident_report: Optional[str]
     loop_count: int
