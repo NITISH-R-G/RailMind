@@ -88,6 +88,36 @@ async def run_agent_graph(ctx, train_numbers: list):
     except Exception as e:
         logger.error(f"Agent graph error in worker: {e}")
 
+async def process_train_telemetry(ctx, payload: list):
+    """
+    Process incoming telemetry chunks by executing the agent graph dynamically.
+    """
+    try:
+        initial_state = AgentState(
+            raw_train_data=payload,
+            anomalies=[],
+            claude_reasoning="",
+            reroute_plan=None,
+            department_tasks=[],
+            sms_alerts_sent=[],
+            incident_report=None,
+            loop_count=0,
+            should_continue=False,
+            last_api_call="Never",
+            railways_latency_ms=0,
+            ai_latency_ms=0,
+            processed_trains=[]
+        )
+
+        thread_id = f"telemetry_{uuid.uuid4().hex[:8]}"
+        config = {"configurable": {"thread_id": thread_id}, "recursion_limit": 20}
+
+        logger.info(f"Invoking graph with dynamic telemetry payload ({len(payload)} items)...")
+        result = await railmind_graph.ainvoke(initial_state, config)
+        logger.info(f"Telemetry graph invocation completed with loop_count {result.get('loop_count', 0)}")
+    except Exception as e:
+        logger.error(f"Error in process_train_telemetry: {e}")
+
 # Provide the background poller function that enqueues jobs
 async def poll_railways_api(ctx):
     """
@@ -103,7 +133,7 @@ async def poll_railways_api(ctx):
     await ctx["redis"].enqueue_job("run_agent_graph", train_numbers)
 
 class WorkerSettings:
-    functions = [run_agent_graph]
+    functions = [run_agent_graph, process_train_telemetry]
     cron_jobs = [
         # Run every minute
         worker.cron(poll_railways_api, minute=set(range(60)))
