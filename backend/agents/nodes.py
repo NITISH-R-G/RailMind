@@ -1119,14 +1119,13 @@ async def alert_node(state: AgentState) -> AgentState:
     return {}
 
 async def save_incident_if_not_duplicate(incident):
-    # Check last 5 minutes for same train number
-    duplicate = await db_client.has_recent_incident(incident["train_number"], minutes=5)
-    
-    if duplicate:
-        print(f"[RAILMIND] Skipping duplicate incident for train {incident['train_number']} (last logged in the last 5 minutes)")
+    # Duplicate prevention is handled natively by the database using idempotent inserts
+    # with a 5-minute bucketed unique compound index.
+    inserted = await db_client.insert_incident(incident)
+    if not inserted:
+        print(f"[RAILMIND] Skipping duplicate incident for train {incident['train_number']} (idempotency triggered)")
         return False
     
-    await db_client.insert_incident(incident)
     print(f"[RAILMIND] New incident saved: {incident['incident_title']}")
     return True
 
